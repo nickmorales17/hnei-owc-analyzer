@@ -29,6 +29,18 @@ class DataValidationTests(unittest.TestCase):
         self.assertAlmostEqual(intervals.iloc[1], 0.1)
         self.assertAlmostEqual(intervals.iloc[2], 0.1)
 
+    def test_sampling_rate_and_jitter_reporting(self):
+        frame = pd.DataFrame({
+            "Original_Row_Order": range(4),
+            "TimeStamp": pd.to_datetime(["2026-01-01 00:00:00.0", "2026-01-01 00:00:00.1", "2026-01-01 00:00:00.2", "2026-01-01 00:00:00.4"], format="mixed"),
+            "RecNum": range(4),
+            "Pressure_1": [1, 2, 3, 4],
+        })
+        audit = validate_data(frame, CONFIG).audit
+        self.assertAlmostEqual(audit["median_derived_sampling_rate_hz"], 10.0)
+        self.assertAlmostEqual(audit["effective_mean_sampling_rate_hz"], 7.5)
+        self.assertAlmostEqual(audit["sampling_interval_cv_percent"], audit["sampling_interval_cv_ratio"] * 100)
+
     def test_duplicate_and_record_gap_detection(self):
         frame = pd.DataFrame({
             "Original_Row_Order": [0, 1, 2, 3],

@@ -1,5 +1,7 @@
 # Default configuration for the HNEI OWC analyzer.
 expected_cycle_times_s: [8, 7, 6, 5]
+target_cycle_tolerance_s: 0.10
+inferred_label_confidence_threshold: 0.65
 
 column_aliases:
   TimeStamp: [timestamp, time_stamp, time, datetime, date_time]
@@ -65,9 +67,30 @@ quality_thresholds:
   maximum_lag_cycle_fraction: 0.50
 
 steady_state:
-  period_tolerance_fraction: 0.05
-  amplitude_tolerance_fraction: 0.10
-  minimum_steady_cycles: 5
+  minimum_steady_cycles: 3
+  period_stability_tolerance: 0.12
+  amplitude_stability_tolerance: 0.35
+  manual_overrides: []
+
+activity_detection:
+  signals: [Encoder, Pressure_1, Pressure_2, Torque]
+  rolling_window_s: 1.0
+  encoder_std_threshold: 10.0
+  encoder_range_threshold: 35.0
+  supporting_noise_multiplier: 5.0
+  active_score_threshold: 1.0
+  minimum_active_duration_s: 8.0
+  minimum_idle_duration_s: 1.5
+  block_merge_gap_s: 0.75
+  edge_cleanup_s: 0.25
+
+period_estimation:
+  smoothing_window_s: 1.0
+  peak_prominence: 60.0
+  minimum_peak_spacing_s: 4.0
+  autocorrelation_min_period_s: 4.0
+  autocorrelation_max_period_s: 9.0
+  expected_match_tolerance_s: 0.75
 
 encoder:
   peak_prominence: null
@@ -85,4 +108,4 @@ plotting:
   formats: [png]
 
 manual_run_boundary_overrides: []
-
+manual_steady_state_overrides: []

@@ -148,8 +148,10 @@ def validate_data(frame: pd.DataFrame, config: dict[str, Any]) -> ValidationResu
         "sampling_interval_mean_s": float(positive_intervals.mean()) if not positive_intervals.empty else np.nan,
         "sampling_interval_min_s": float(positive_intervals.min()) if not positive_intervals.empty else np.nan,
         "sampling_interval_max_s": float(positive_intervals.max()) if not positive_intervals.empty else np.nan,
-        "sampling_interval_cv": jitter_cv,
-        "estimated_sampling_rate_hz": 1.0 / median_interval if np.isfinite(median_interval) and median_interval > 0 else np.nan,
+        "sampling_interval_cv_ratio": jitter_cv,
+        "sampling_interval_cv_percent": jitter_cv * 100.0 if np.isfinite(jitter_cv) else np.nan,
+        "median_derived_sampling_rate_hz": 1.0 / median_interval if np.isfinite(median_interval) and median_interval > 0 else np.nan,
+        "effective_mean_sampling_rate_hz": 1.0 / positive_intervals.mean() if not positive_intervals.empty and positive_intervals.mean() > 0 else np.nan,
     }
     for column, count in missing_by_column.items():
         audit[f"missing:{column}"] = int(count)
