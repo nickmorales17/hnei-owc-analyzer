@@ -39,10 +39,10 @@ sensor_layout:
   Pressure_4: {location: downstream, pair: Pressure_3}
 
 sensor_units:
-  Pressure_1: Pa
-  Pressure_2: Pa
-  Pressure_3: Pa
-  Pressure_4: Pa
+  Pressure_1: unknown
+  Pressure_2: unknown
+  Pressure_3: unknown
+  Pressure_4: unknown
   Torque: unknown
   Encoder: unknown
   Gen_V: V
@@ -70,6 +70,31 @@ quality_thresholds:
   spike_z_threshold: 6.0
   sampling_gap_factor: 3.0
   maximum_lag_cycle_fraction: 0.50
+
+stage5:
+  maximum_lag_fraction: 0.50
+  fallback_maximum_lag_s: 1.0
+  pair_minimum_correlation: 0.50
+  pair_phase_tolerance_deg: 30.0
+  pair_amplitude_tolerance_fraction: 0.35
+  pair_offset_tolerance: 50.0
+  quality_rolling_window_s: 0.25
+  spike_mad_threshold: 8.0
+  clipping_decimal_places: 9
+  clipping_repetition_fraction: 0.05
+  near_constant_std: 0.000001
+  drift_relative_threshold: 0.10
+  minimum_regression_observations: 3
+  attenuation_disagreement_tolerance: 0.15
+  pressure_calibration_status: unavailable_missing_calibration
+  minimum_lag_analysis_cycles: 2
+  lag_reliable_correlation: 0.60
+  conflicting_peak_fraction: 0.995
+  conflicting_peak_separation_cycle_fraction: 0.10
+  genv_minimum_total_drift: 0.01
+  genv_drift_std_fraction: 0.25
+  genv_periodicity_correlation: 0.50
+  genv_periodicity_confidence: 0.15
 
 steady_state:
   minimum_steady_cycles: 3

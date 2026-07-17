@@ -100,3 +100,45 @@ def create_stage4_diagnostics(data: pd.DataFrame, blocks: list[RunBlock], cycle_
         for i,column in enumerate(columns): ax.bar(x+(i-(len(columns)-1)/2)*width,merged[column],width,label=column)
         ax.set_xticks(x,labels); ax.set(title=title,xlabel="Run ID",ylabel=ylabel); ax.grid(axis="y",alpha=.25); ax.legend(fontsize=7); path=graph_dir/filename; fig.tight_layout(); fig.savefig(path,dpi=dpi); plt.close(fig); created.append(path)
     return created
+
+
+def create_stage5_diagnostics(data: pd.DataFrame, blocks: list[RunBlock], pressure_pairs: pd.DataFrame, pressure_response: pd.DataFrame, torque: pd.DataFrame, generator: pd.DataFrame, quality_counts: pd.DataFrame, output_dir: Path, config: dict[str, Any]) -> list[Path]:
+    """Create verification plots for Stage 5 without changing source signals."""
+    graph_dir=output_dir/"graphs"/"stage5_diagnostics"; graph_dir.mkdir(parents=True,exist_ok=True)
+    dpi=int(config.get("plotting",{}).get("dpi",180)); elapsed=_elapsed(data); created=[]
+    def save(fig:plt.Figure,name:str)->None:
+        path=graph_dir/name; fig.tight_layout(); fig.savefig(path,dpi=dpi); plt.close(fig); created.append(path)
+    for block in blocks:
+        run=data.loc[block.start_row:block.end_row]; x=elapsed.loc[run.index]
+        for columns,name,title in [(["Pressure_1","Pressure_2","Pressure_3","Pressure_4"],"pressures","Recorded pressure channels"),(["Upstream_Mean","Downstream_Mean"],"upstream_downstream","Upstream and downstream means"),(["Turbine_DeltaP"],"turbine_delta_p","Turbine differential pressure"),(["Torque"],"torque","Torque response"),(["Gen_V"],"generator_voltage","Generator-voltage response")]:
+            available=[c for c in columns if c in run]
+            if not available: continue
+            fig,ax=plt.subplots(figsize=(10,4))
+            for c in available: ax.plot(x,run[c],lw=.7,label=c)
+            ax.set(title=f"{block.run_id} — {title}",xlabel="Elapsed time (s)",ylabel="Recorded/configured units"); ax.grid(alpha=.25); ax.legend(fontsize=7); save(fig,f"{block.run_id}_{name}.png")
+        available=[c for c in ["Pressure_1","Pressure_2","Pressure_3","Pressure_4"] if f"{c}_Spike_Flag" in run]
+        if available:
+            fig,ax=plt.subplots(figsize=(10,4))
+            for c in available:
+                ax.plot(x,run[c],lw=.5,label=c); flagged=run[f"{c}_Spike_Flag"]
+                ax.scatter(x[flagged],run.loc[flagged,c],s=14,marker="x")
+            ax.set(title=f"{block.run_id} — pressure spike candidates (raw retained)",xlabel="Elapsed time (s)",ylabel="Pressure (configured units)"); ax.grid(alpha=.25); ax.legend(fontsize=7); save(fig,f"{block.run_id}_pressure_quality.png")
+    if not pressure_pairs.empty:
+        subset=pressure_pairs[(pressure_pairs.Pair.isin(["upstream_pair","downstream_pair","upstream_to_downstream_mean"]))&(pressure_pairs.Data_Version=="raw")]
+        labels=subset.Run_ID.astype(str)+" — "+subset.Pair.str.replace("upstream_to_downstream_mean","upstream/downstream mean").str.replace("_pair"," pair")
+        fig,ax=plt.subplots(figsize=(9,6)); ax.barh(labels,subset.Wrapped_Phase_Degrees); ax.set(title="Pressure-pair phase difference",xlabel="Phase (degrees; wrapped ±180°)",ylabel="Run and relationship"); ax.grid(axis="x",alpha=.25); save(fig,"pressure_pair_phase.png")
+        fig,ax=plt.subplots(figsize=(9,6)); ax.barh(labels,subset.Peak_To_Peak_Amplitude_Ratio); ax.axvline(1,color="black",ls="--"); ax.set(title="Pressure-pair peak-to-peak amplitude ratios",xlabel="Second / first amplitude ratio",ylabel="Run and relationship"); ax.grid(axis="x",alpha=.25); save(fig,"pressure_pair_amplitude_ratios.png")
+    if not torque.empty:
+        for metric in ["Mean_Torque","Peak_Torque","RMS_Torque"]:
+            fig,ax=plt.subplots(figsize=(7,4)); ax.scatter(torque.Measured_Cycle_Frequency_Hz,torque[metric]);
+            for _,r in torque.iterrows(): ax.annotate(str(r.Run_ID),(r.Measured_Cycle_Frequency_Hz,r[metric]),fontsize=7)
+            ax.set(title=f"{metric} versus measured cycle frequency",xlabel="Measured cycle frequency (Hz)",ylabel=f"{metric} (recorded units)"); ax.grid(alpha=.25); save(fig,f"{metric.lower()}_vs_frequency.png")
+    if not generator.empty and not torque.empty:
+        merged=generator.merge(torque,on="Run_ID")
+        for xcol,xlabel,name in [("Measured_Cycle_Frequency_Hz","Measured cycle frequency (Hz)","gen_v_vs_frequency"),("Mean_Torque","Mean torque (recorded units)","gen_v_vs_torque")]:
+            fig,ax=plt.subplots(figsize=(7,4)); ax.scatter(merged[xcol],merged.Mean)
+            for _,r in merged.iterrows(): ax.annotate(str(r.Run_ID),(r[xcol],r.Mean),fontsize=7)
+            ax.set(title="Mean Gen_V exploratory comparison",xlabel=xlabel,ylabel="Mean Gen_V (V)"); ax.grid(alpha=.25); save(fig,f"{name}.png")
+    if not quality_counts.empty:
+        q=quality_counts.groupby("Check").Finding_Count.sum().sort_values(); fig,ax=plt.subplots(figsize=(8,4)); q.plot(kind="barh",ax=ax); ax.set(title="Stage 5 quality findings",xlabel="Finding count",ylabel="Check"); ax.grid(axis="x",alpha=.25); save(fig,"quality_finding_counts.png")
+    return created

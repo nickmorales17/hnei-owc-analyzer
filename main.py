@@ -1,4 +1,4 @@
-"""Command-line entry point for the HNEI OWC Stage 1–4 pipeline."""
+"""Command-line entry point for the HNEI OWC Stage 1–5 pipeline."""
 
 from __future__ import annotations
 
@@ -13,7 +13,11 @@ import pandas as pd
 from src.data_validation import validate_data
 from src.file_loader import load_config, load_data_file
 from src.cycle_analysis import analyze_encoder_cycles, classify_encoder_behavior
-from src.plotting import create_stage3_diagnostics, create_stage4_diagnostics
+from src.plotting import create_stage3_diagnostics, create_stage4_diagnostics, create_stage5_diagnostics
+from src.pressure_analysis import add_derived_pressure_channels, add_dynamic_pressure_channels, analyze_pressure_pairs, pressure_response_summary
+from src.statistics_analysis import descriptive_statistics, cycle_level_statistics, torque_summary, generator_summary, correlation_regression_summary
+from src.correlation_analysis import torque_phase_summary
+from src.quality_checks import apply_quality_checks
 from src.signal_processing import process_encoder
 from src.steady_state import annotate_operating_states, classify_steady_state
 from src.test_segmentation import (
@@ -57,7 +61,7 @@ def write_audit(audit: dict[str, object], path: Path) -> None:
 def run(args: argparse.Namespace) -> Path:
     output_dir = prepare_output_directory(args.output)
     configure_logging(output_dir / "run_log.txt", args.debug)
-    logging.info("Starting Stage 1–4 intake, detection, cycle, and VFD pipeline")
+    logging.info("Starting Stage 1–5 intake, timing, VFD, and response-analysis pipeline")
     config = load_config(args.config)
     loaded = load_data_file(args.input, config, sheet=args.sheet, file_type=args.file_type)
     logging.info("Detected source columns: %s", ", ".join(loaded.source_columns))
@@ -153,6 +157,18 @@ def run(args: argparse.Namespace) -> Path:
         annotated.loc[run_index,"Command_Saturation_Flag"]=vfd["Command_Saturation_Flag"]
 
     final_method_table=pd.concat(method_tables,ignore_index=True); final_summary_table=pd.DataFrame(summary_rows); vfd_table=pd.DataFrame(vfd_rows); behavior_table=pd.DataFrame(behavior_rows); final_intervals=pd.concat([table for table in final_cycle_tables.values() if not table.empty],ignore_index=True)
+    annotated,derived_channels,derived_skipped=add_derived_pressure_channels(annotated)
+    annotated,quality_findings,quality_counts=apply_quality_checks(annotated,sampling_interval,config)
+    annotated,dynamic_channels=add_dynamic_pressure_channels(annotated); derived_channels.extend(dynamic_channels)
+    run_periods={str(row.Run_ID):float(row.Final_Selected_Period_s) for _,row in final_summary_table.iterrows()}
+    descriptive_table=descriptive_statistics(annotated)
+    cycle_level_table=cycle_level_statistics(annotated,config)
+    pressure_pair_table,pressure_consistency_table=analyze_pressure_pairs(annotated,run_periods,sampling_interval,config)
+    pressure_response_table=pressure_response_summary(annotated,cycle_level_table,config)
+    torque_table=torque_summary(annotated,cycle_level_table,run_periods)
+    torque_phase_table=torque_phase_summary(annotated,run_periods,sampling_interval,config)
+    generator_table=generator_summary(annotated,run_periods,config)
+    correlation_table=correlation_regression_summary(annotated,cycle_level_table,torque_table,generator_table,pressure_response_table,int(config.get("stage5",{}).get("minimum_regression_observations",3)))
     annotated.to_csv(output_dir / "cleaned" / "full_annotated_data.csv", index=False)
     annotated.loc[annotated["Is_Steady_State"]].to_csv(output_dir / "cleaned" / "steady_state_data.csv", index=False)
     for block in blocks:
@@ -175,10 +191,23 @@ def run(args: argparse.Namespace) -> Path:
     final_method_table.to_csv(output_dir/"tables"/"encoder_cycle_method_comparison.csv",index=False)
     final_summary_table.to_csv(output_dir/"tables"/"encoder_cycle_summary.csv",index=False)
     vfd_table.to_csv(output_dir/"tables"/"vfd_command_verification.csv",index=False)
+    descriptive_table.to_csv(output_dir/"tables"/"descriptive_statistics.csv",index=False)
+    cycle_level_table.to_csv(output_dir/"tables"/"cycle_level_statistics.csv",index=False)
+    pressure_response_table.to_csv(output_dir/"tables"/"pressure_response_summary.csv",index=False)
+    pressure_pair_table.to_csv(output_dir/"tables"/"pressure_pair_relationships.csv",index=False)
+    pressure_pair_table[[c for c in ["Run_ID","Signal_1","Signal_2","Data_State","Data_Version","Zero_Lag_Pearson","Zero_Lag_Spearman","Maximum_Lagged_Correlation","Maximum_Absolute_Lagged_Correlation","Signed_Lag_Samples","Signed_Lag_Seconds","Phase_Degrees","Wrapped_Phase_Degrees","Lag_Sign_Convention","Measured_Cycle_s","Lag_Search_Limit_s","Reliability","Reliability_Reason"] if c in pressure_pair_table]].to_csv(output_dir/"tables"/"pressure_phase_lag_summary.csv",index=False)
+    pressure_consistency_table.to_csv(output_dir/"tables"/"pressure_sensor_consistency.csv",index=False)
+    torque_table.to_csv(output_dir/"tables"/"torque_summary.csv",index=False)
+    torque_phase_table.to_csv(output_dir/"tables"/"torque_phase_summary.csv",index=False)
+    generator_table.to_csv(output_dir/"tables"/"generator_voltage_summary.csv",index=False)
+    correlation_table.to_csv(output_dir/"tables"/"correlation_regression_summary.csv",index=False)
+    quality_findings.to_csv(output_dir/"tables"/"quality_flags_summary.csv",index=False)
     graphs = create_stage3_diagnostics(annotated, blocks, detection_results, output_dir, config)
     logging.info("Created %d Stage 3 diagnostic graphs", len(graphs))
     stage4_graphs=create_stage4_diagnostics(annotated,blocks,final_cycle_tables,final_method_table,final_summary_table,vfd_table,final_events,output_dir,config)
     logging.info("Created %d Stage 4 diagnostic graphs",len(stage4_graphs))
+    stage5_graphs=create_stage5_diagnostics(annotated,blocks,pressure_pair_table,pressure_response_table,torque_table,generator_table,quality_counts,output_dir,config)
+    logging.info("Created %d Stage 5 diagnostic graphs",len(stage5_graphs))
 
     print("\nINTAKE AUDIT")
     print(f"Detected columns: {', '.join(column for column in loaded.data.columns if column != 'Original_Row_Order')}")
@@ -213,8 +242,15 @@ def run(args: argparse.Namespace) -> Path:
     for summary,vfd in zip(summary_rows,vfd_rows):
         capped = f"{vfd['Command_Equivalent_Cycle_s']:.3f} s" if pd.notna(vfd['Command_Equivalent_Cycle_s']) else "unavailable"
         print(f"- {summary['Run_ID']}: final selected={summary['Final_Selected_Period_s']:.3f} s, valid interval mean={summary['Valid_Interval_Mean_s']:.3f} s, valid sample std={summary['Valid_Sample_Std_Cycle_s']:.4f} s, valid sample CV={summary['Valid_Sample_CV_Ratio']:.6f} ({summary['Valid_Sample_CV_Percent']:.3f}%), timing-method confidence={summary['Timing_Method_Confidence']:.3f}, capped expectation={capped}, saturation={vfd['Command_Saturation_Flag']}")
+    print("Stage 5 response analysis:")
+    print(f"- Derived pressure channels: {', '.join(derived_channels) if derived_channels else 'none'}")
+    for skipped in derived_skipped: print(f"- Skipped: {skipped}")
+    print(f"- Pressure relationships evaluated: {len(pressure_pair_table)}; quality findings: {len(quality_findings)}")
+    print("- Primary torque trend: torque increased with measured cycle frequency and decreased with commanded cycle period; the n=4 run-summary regression is exploratory.")
+    for _,row in pressure_response_table.iterrows(): print(f"- {row.Run_ID} attenuation: raw={row.Raw_Attenuation_Ratio:.3f}, robust={row.Robust_Attenuation_Ratio:.3f}, median-cycle={row.Median_Cycle_Attenuation_Ratio:.3f}, raw/robust disagreement={row.Raw_Robust_Attenuation_Disagreement_Flag}")
+    for _,row in generator_table.iterrows(): print(f"- {row.Run_ID} Gen_V: drift={row.Drift_Classification}, periodicity={row.Periodicity_Classification}, combined={row.Combined_GenV_Classification}")
     print(f"Output directory: {output_dir}")
-    logging.info("Stage 1–4 pipeline complete")
+    logging.info("Stage 1–5 pipeline complete")
     return output_dir
 
 

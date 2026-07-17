@@ -2,7 +2,7 @@
 
 A reusable command-line project for intake and later engineering analysis of HNEI oscillating-water-column test-bench data.
 
-This implementation covers **Stage 1–4**: reusable intake validation, test grouping, active/steady-state detection, encoder processing and behavior classification, multi-method final cycle timing, and VFD-command verification. Pressure, torque, generator-voltage, correlation, final reporting, and Stage 5+ work remain intentionally deferred.
+This implementation covers **Stage 1–5**: reusable intake validation, test grouping, encoder timing and VFD verification, plus pressure-response, torque, generator-voltage, correlation/regression, and non-destructive signal-quality analysis. Stage 6 and later work remain intentionally deferred.
 
 ## Installation
 
@@ -15,10 +15,10 @@ python -m pip install -r requirements.txt
 
 The existing virtual environment uses Python 3.12. On Windows, activate it with `.venv\\Scripts\\activate`.
 
-## Run the Stage 1–4 analysis pipeline
+## Run the Stage 1–5 analysis pipeline
 
 ```bash
-python main.py --input input/hnei_owc_test_2026_07_14.xlsx
+python main.py --input input/hnei_owc_test_2026_07_14.xlsx --config config/legacy_config.yaml
 ```
 
 Optional arguments:
@@ -50,6 +50,11 @@ The intake run writes:
 - `tables/encoder_cycle_intervals.csv`, `encoder_cycle_method_comparison.csv`, and `encoder_cycle_summary.csv`
 - `tables/vfd_command_verification.csv`
 - `graphs/stage4_diagnostics/` — encoder timing and reconstructed-command verification plots
+- `tables/descriptive_statistics.csv` and `cycle_level_statistics.csv`
+- `tables/pressure_response_summary.csv`, `pressure_pair_relationships.csv`, `pressure_phase_lag_summary.csv`, and `pressure_sensor_consistency.csv`
+- `tables/torque_summary.csv`, `torque_phase_summary.csv`, and `generator_voltage_summary.csv`
+- `tables/correlation_regression_summary.csv` and `quality_flags_summary.csv`
+- `graphs/stage5_diagnostics/` — pressure, phase/amplitude, torque, generator, and quality-evidence plots
 
 The source workbook is opened read-only and is never modified.
 
@@ -67,7 +72,7 @@ The period searches cover at least 1.5–10 seconds. Peak spacing and smoothing 
 python -m unittest discover -s tests -v
 ```
 
-## Stage 1–4 behavior
+## Stage 1–5 behavior
 
 - Detects Excel worksheets and selects the requested sheet, or the most likely data sheet based on recognized headers and row count.
 - Detects a likely units row without relying on fixed sample-workbook row boundaries.
@@ -95,6 +100,14 @@ CSV files retain calculation precision. Terminal and engineering-summary display
 
 For the legacy 5-second case, the nominal-to-capped expectation difference is about 0.020921 seconds. Numerical closeness alone is not treated as evidence: sampling interval, timing variation, interval count, and recorded command/frequency availability are considered before claiming the two expectations are distinguishable.
 
+Stage 5 adds pressure means and differential channels only when their source sensors exist. Raw peak-to-peak, robust 5th-to-95th-percentile, and median cycle-level attenuation are reported separately; robust and median-cycle attenuation are the primary engineering comparisons because one isolated extremum can distort raw peak-to-peak response. A configurable disagreement flag identifies raw/robust differences that need review.
+
+Run-median-centered `Upstream_Dynamic`, `Downstream_Dynamic`, and `Turbine_DeltaP_Dynamic` channels separate oscillatory response from sensor offsets. Cycle-centered dynamic differential pressure is also provided where cycle boundaries exist. Raw differential-pressure channels remain available, but raw mean differential pressure is not interpreted as an absolute physical turbine pressure drop unless compatible calibration, units, zero references, and sign conventions are documented. Pressure and torque units default to `unknown`; signal magnitudes are never used to infer units.
+
+Pressure-pair tables state the data state/version, zero-lag correlation, signed maximum-correlation lag, unwrapped and wrapped phase, lag-search limit, and reliability evidence. The convention is: positive lag means `Signal_2` occurs after `Signal_1`. Phase is calculated as `360 × lag_seconds / measured_cycle_seconds` and wrapped into −180° through +180°. Weak correlation, too few cycles, or competing correlation peaks limits reliability.
+
+Torque and generator comparisons are labeled by data level (sample, cycle, or run summary). The primary observed torque wording is: torque increased with measured cycle frequency and decreased with commanded cycle period. Fits across the four legacy operating conditions are exploratory (`n = 4`) and are not presented as conclusive performance laws. `Gen_V` drift and periodicity are classified independently, then combined into `periodic_with_drift`, `periodic_without_significant_drift`, `drifting_nonperiodic`, `nearly_constant`, or `unknown`. Its physical channel meaning remains explicitly undocumented, and sequential run order plus overall drift confound frequency comparisons. Quality checks add flags, severity, and filtered companion columns; raw sensor columns and all rows remain unchanged. Spike, clipping, offset, drift, and near-constant findings are evidence for review, not automatic declarations of sensor failure.
+
 ## Project layout
 
-Modules for Stage 4+ remain placeholders so later analysis is not implemented prematurely.
+Stage 6 modules and reporting are intentionally not implemented.
