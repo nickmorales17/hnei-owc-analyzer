@@ -1,4 +1,4 @@
-"""Command-line entry point for the HNEI OWC Stage 1–5 pipeline."""
+"""Command-line entry point for the HNEI OWC Stage 1–6 analysis package."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pandas as pd
 from src.data_validation import validate_data
 from src.file_loader import load_config, load_data_file
 from src.cycle_analysis import analyze_encoder_cycles, classify_encoder_behavior
-from src.plotting import create_stage3_diagnostics, create_stage4_diagnostics, create_stage5_diagnostics
+from src.plotting import create_stage3_diagnostics, create_stage4_diagnostics, create_stage5_diagnostics, create_final_graph_package
 from src.pressure_analysis import add_derived_pressure_channels, add_dynamic_pressure_channels, analyze_pressure_pairs, pressure_response_summary
 from src.statistics_analysis import descriptive_statistics, cycle_level_statistics, torque_summary, generator_summary, correlation_regression_summary
 from src.correlation_analysis import torque_phase_summary
@@ -29,6 +29,9 @@ from src.test_segmentation import (
 )
 from src.utilities import prepare_output_directory
 from src.vfd_analysis import verify_vfd_run
+from src.reporting import build_cross_test_comparison,build_pressure_derived_summary,create_markdown_reports
+from src.excel_reporting import create_excel_workbook
+from src.package_outputs import build_reproducibility_metadata,create_analysis_bundle,create_file_manifest,save_reproducibility
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,6 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--show-plots", action="store_true", help="Plots are saved; interactive display remains disabled")
     parser.add_argument("--no-smoothing", action="store_true", help="Reserved for later signal-analysis stages")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--skip-report", action="store_true", help="Skip Markdown report creation")
+    parser.add_argument("--skip-excel", action="store_true", help="Skip Excel workbook creation")
+    parser.add_argument("--skip-zip", action="store_true", help="Skip ZIP bundle creation")
     return parser
 
 
@@ -61,7 +67,7 @@ def write_audit(audit: dict[str, object], path: Path) -> None:
 def run(args: argparse.Namespace) -> Path:
     output_dir = prepare_output_directory(args.output)
     configure_logging(output_dir / "run_log.txt", args.debug)
-    logging.info("Starting Stage 1–5 intake, timing, VFD, and response-analysis pipeline")
+    logging.info("Starting Stage 1–6 engineering-analysis package")
     config = load_config(args.config)
     loaded = load_data_file(args.input, config, sheet=args.sheet, file_type=args.file_type)
     logging.info("Detected source columns: %s", ", ".join(loaded.source_columns))
@@ -202,12 +208,34 @@ def run(args: argparse.Namespace) -> Path:
     generator_table.to_csv(output_dir/"tables"/"generator_voltage_summary.csv",index=False)
     correlation_table.to_csv(output_dir/"tables"/"correlation_regression_summary.csv",index=False)
     quality_findings.to_csv(output_dir/"tables"/"quality_flags_summary.csv",index=False)
+    pressure_derived_table=build_pressure_derived_summary(annotated,config.get("sensor_units",{})); pressure_derived_table.to_csv(output_dir/"tables"/"pressure_derived_channels_summary.csv",index=False)
+    torque_table.to_csv(output_dir/"tables"/"torque_analysis_summary.csv",index=False)
+    torque_phase_table.to_csv(output_dir/"tables"/"torque_phase_lag_summary.csv",index=False)
+    quality_findings.to_csv(output_dir/"tables"/"signal_quality_findings.csv",index=False)
+    quality_counts.to_csv(output_dir/"tables"/"signal_quality_counts.csv",index=False)
     graphs = create_stage3_diagnostics(annotated, blocks, detection_results, output_dir, config)
     logging.info("Created %d Stage 3 diagnostic graphs", len(graphs))
     stage4_graphs=create_stage4_diagnostics(annotated,blocks,final_cycle_tables,final_method_table,final_summary_table,vfd_table,final_events,output_dir,config)
     logging.info("Created %d Stage 4 diagnostic graphs",len(stage4_graphs))
     stage5_graphs=create_stage5_diagnostics(annotated,blocks,pressure_pair_table,pressure_response_table,torque_table,generator_table,quality_counts,output_dir,config)
     logging.info("Created %d Stage 5 diagnostic graphs",len(stage5_graphs))
+    steady_metrics=pd.DataFrame([{"Run_ID":block.run_id,"Steady_State_Sample_Count":int(annotated.loc[block.start_row:block.end_row,"Is_Steady_State"].sum()),"Steady_State_Duration_s":float((annotated.loc[annotated.loc[block.start_row:block.end_row].index[annotated.loc[block.start_row:block.end_row,"Is_Steady_State"]],"TimeStamp"].max()-annotated.loc[annotated.loc[block.start_row:block.end_row].index[annotated.loc[block.start_row:block.end_row,"Is_Steady_State"]],"TimeStamp"].min()).total_seconds())} for block in blocks])
+    table_context={"intake_audit":pd.DataFrame([{"Metric":k,"Value":v} for k,v in validated.audit.items()]),"boundaries":boundaries,"steady":steady_table,"steady_metrics":steady_metrics,"vfd":vfd_table,"encoder_summary":final_summary_table,"encoder_methods":final_method_table,"encoder_intervals":final_intervals,"descriptive":descriptive_table,"cycle_level":cycle_level_table,"pressure_derived":pressure_derived_table,"pressure_response":pressure_response_table,"pressure_pairs":pressure_pair_table,"pressure_phase":pressure_pair_table[[c for c in ["Run_ID","Signal_1","Signal_2","Data_State","Data_Version","Zero_Lag_Pearson","Zero_Lag_Spearman","Maximum_Lagged_Correlation","Maximum_Absolute_Lagged_Correlation","Signed_Lag_Samples","Signed_Lag_Seconds","Phase_Degrees","Wrapped_Phase_Degrees","Lag_Sign_Convention","Measured_Cycle_s","Lag_Search_Limit_s","Reliability","Reliability_Reason"] if c in pressure_pair_table]],"pressure_consistency":pressure_consistency_table,"torque":torque_table,"torque_phase":torque_phase_table,"generator":generator_table,"correlation":correlation_table,"quality_findings":quality_findings,"quality_counts":quality_counts}
+    cross_test=build_cross_test_comparison(table_context); cross_test.to_csv(output_dir/"tables"/"cross_test_comparison.csv",index=False)
+    table_context["cross_test"]=cross_test
+    reporting_settings=config.get("reporting",{}); final_graphs=[]
+    if reporting_settings.get("enabled",True) and reporting_settings.get("include_final_graphs",True): final_graphs=create_final_graph_package(annotated,blocks,table_context,output_dir,config); logging.info("Created %d final Stage 6 graphs",len(final_graphs))
+    metadata=build_reproducibility_metadata(args.input,args.config,config,output_dir,loaded.selected_sheet,len(annotated),[c for c in loaded.data.columns if c!="Original_Row_Order"])
+    save_reproducibility(output_dir,metadata,config); logging.info("Reproducibility: %s",metadata)
+    report_context={"tables":table_context,"cross_test":cross_test,"audit":validated.audit,"metadata":metadata,"annotated":annotated}
+    if reporting_settings.get("enabled",True) and reporting_settings.get("create_markdown_reports",True) and not args.skip_report: create_markdown_reports(output_dir,report_context,config)
+    _,manifest_frame=create_file_manifest(output_dir)
+    if reporting_settings.get("enabled",True) and reporting_settings.get("create_excel",True) and not args.skip_excel:
+        create_excel_workbook(output_dir/"analysis_summary.xlsx",report_context,config,manifest_frame); _,manifest_frame=create_file_manifest(output_dir); create_excel_workbook(output_dir/"analysis_summary.xlsx",report_context,config,manifest_frame); create_file_manifest(output_dir)
+    if reporting_settings.get("enabled",True) and reporting_settings.get("create_zip_bundle",True) and not args.skip_zip:
+        create_analysis_bundle(output_dir); _,manifest_frame=create_file_manifest(output_dir)
+        if reporting_settings.get("create_excel",True) and not args.skip_excel: create_excel_workbook(output_dir/"analysis_summary.xlsx",report_context,config,manifest_frame); create_file_manifest(output_dir)
+        create_analysis_bundle(output_dir)
 
     print("\nINTAKE AUDIT")
     print(f"Detected columns: {', '.join(column for column in loaded.data.columns if column != 'Original_Row_Order')}")
@@ -237,7 +265,7 @@ def run(args: argparse.Namespace) -> Path:
     print("Detected runs:")
     for block, period in zip(blocks, period_rows):
         summary = detection_results[block.run_id][1]
-        print(f"- {block.run_id}: rows {block.start_row}-{block.end_row}, preliminary period={period['selected_preliminary_period_s']:.3f} s, inferred target={block.provisional_target_cycle_s}, confidence={block.detection_confidence:.3f}, steady cycles={summary['steady_cycle_count']}")
+        print(f"- {block.run_id}: rows {block.start_row}-{block.end_row}, preliminary period={period['selected_preliminary_period_s']:.3f} s, {block.target_source} target={block.provisional_target_cycle_s}, confidence={block.detection_confidence:.3f}, steady cycles={summary['steady_cycle_count']}")
     print("Final encoder cycle and VFD verification:")
     for summary,vfd in zip(summary_rows,vfd_rows):
         capped = f"{vfd['Command_Equivalent_Cycle_s']:.3f} s" if pd.notna(vfd['Command_Equivalent_Cycle_s']) else "unavailable"
@@ -246,11 +274,11 @@ def run(args: argparse.Namespace) -> Path:
     print(f"- Derived pressure channels: {', '.join(derived_channels) if derived_channels else 'none'}")
     for skipped in derived_skipped: print(f"- Skipped: {skipped}")
     print(f"- Pressure relationships evaluated: {len(pressure_pair_table)}; quality findings: {len(quality_findings)}")
-    print("- Primary torque trend: torque increased with measured cycle frequency and decreased with commanded cycle period; the n=4 run-summary regression is exploratory.")
+    print(f"- Primary torque trend: torque increased with measured cycle frequency and decreased with commanded cycle period; the n={len(torque_table)} run-summary regression is exploratory.")
     for _,row in pressure_response_table.iterrows(): print(f"- {row.Run_ID} attenuation: raw={row.Raw_Attenuation_Ratio:.3f}, robust={row.Robust_Attenuation_Ratio:.3f}, median-cycle={row.Median_Cycle_Attenuation_Ratio:.3f}, raw/robust disagreement={row.Raw_Robust_Attenuation_Disagreement_Flag}")
     for _,row in generator_table.iterrows(): print(f"- {row.Run_ID} Gen_V: drift={row.Drift_Classification}, periodicity={row.Periodicity_Classification}, combined={row.Combined_GenV_Classification}")
     print(f"Output directory: {output_dir}")
-    logging.info("Stage 1–5 pipeline complete")
+    logging.info("Stage 1–6 analysis package complete")
     return output_dir
 
 

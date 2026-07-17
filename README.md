@@ -2,7 +2,7 @@
 
 A reusable command-line project for intake and later engineering analysis of HNEI oscillating-water-column test-bench data.
 
-This implementation covers **Stage 1–5**: reusable intake validation, test grouping, encoder timing and VFD verification, plus pressure-response, torque, generator-voltage, correlation/regression, and non-destructive signal-quality analysis. Stage 6 and later work remain intentionally deferred.
+This implementation covers **Stage 1–6**: reusable intake validation, test grouping, encoder timing and VFD verification, pressure/torque/generator analysis, and an automated engineering package containing cleaned exports, CSV tables, final graphs, Markdown reports, an Excel workbook, reproducibility metadata, a manifest, and a ZIP archive. Stage 7 and application/dashboard work remain intentionally deferred.
 
 ## Installation
 
@@ -15,7 +15,7 @@ python -m pip install -r requirements.txt
 
 The existing virtual environment uses Python 3.12. On Windows, activate it with `.venv\\Scripts\\activate`.
 
-## Run the Stage 1–5 analysis pipeline
+## Run the complete Stage 1–6 analysis package
 
 ```bash
 python main.py --input input/hnei_owc_test_2026_07_14.xlsx --config config/legacy_config.yaml
@@ -34,6 +34,20 @@ python main.py \
 ```
 
 `--file-type` accepts `auto`, `csv`, `xlsx`, or `xls`. Diagnostic plots are saved non-interactively. `--no-smoothing` is reserved for later analysis stages. If `--output` is omitted, a timestamped directory is created under `output/`. Existing non-empty output directories are protected from overwrite.
+
+Reports, Excel, and ZIP outputs are created by default. Use `--skip-report`, `--skip-excel`, or `--skip-zip` to omit an individual deliverable. `--show-plots` remains accepted; figures are always saved and the default execution remains noninteractive.
+
+The committed synthetic new-turbine fixture exercises recorded decimal targets with intentionally unavailable VFD scaling:
+
+```bash
+python3 main.py \
+  --input sample_data/synthetic_new_turbine_stage6.csv \
+  --output output/synthetic_new_turbine_repository_validation \
+  --config config/new_turbine_config.yaml \
+  --file-type csv
+```
+
+The fixture is stored under `sample_data/` so it remains available after cloning. Real HNEI inputs remain under the Git-ignored `input/` directory and are not committed.
 
 The intake run writes:
 
@@ -55,6 +69,11 @@ The intake run writes:
 - `tables/torque_summary.csv`, `torque_phase_summary.csv`, and `generator_voltage_summary.csv`
 - `tables/correlation_regression_summary.csv` and `quality_flags_summary.csv`
 - `graphs/stage5_diagnostics/` — pressure, phase/amplitude, torque, generator, and quality-evidence plots
+- `graphs/time_histories/`, `comparison/`, `correlation/`, and `quality/` — polished final graph package
+- `report/engineering_analysis_report.md`, `methods_section.md`, `executive_summary.md`, and `limitations_and_recommendations.md`
+- `analysis_summary.xlsx` — formatted 24-sheet Microsoft Excel review workbook
+- `reproducibility_metadata.json` and `configuration_used.yaml`
+- `file_manifest.txt` and `analysis_bundle.zip`; the original input workbook is excluded from the bundle
 
 The source workbook is opened read-only and is never modified.
 
@@ -72,7 +91,7 @@ The period searches cover at least 1.5–10 seconds. Peak spacing and smoothing 
 python -m unittest discover -s tests -v
 ```
 
-## Stage 1–5 behavior
+## Stage 1–6 behavior
 
 - Detects Excel worksheets and selects the requested sheet, or the most likely data sheet based on recognized headers and row count.
 - Detects a likely units row without relying on fixed sample-workbook row boundaries.
@@ -110,4 +129,4 @@ Torque and generator comparisons are labeled by data level (sample, cycle, or ru
 
 ## Project layout
 
-Stage 6 modules and reporting are intentionally not implemented.
+Stage 6 consumes the already validated Stage 1–5 tables and annotated data. It does not replace those calculations. The Excel workbook uses `openpyxl`; graphs use matplotlib only. Recorded, inferred, reconstructed, raw, filtered, derived, robust, and unavailable values remain explicitly distinguished throughout the package.

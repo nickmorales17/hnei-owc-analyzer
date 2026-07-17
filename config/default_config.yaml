@@ -153,5 +153,24 @@ plotting:
   dpi: 180
   formats: [png]
 
+reporting:
+  enabled: true
+  create_excel: true
+  create_markdown_reports: true
+  create_zip_bundle: true
+  include_diagnostic_graphs: true
+  include_final_graphs: true
+  excel_freeze_panes: true
+  excel_auto_filter: true
+  plot_dpi: 180
+  report_cycle_decimals: 3
+  report_frequency_decimals: 3
+  report_percent_decimals: 3
+  report_command_decimals: 2
+  report_pressure_decimals: 3
+  report_torque_decimals: 3
+  report_gen_v_decimals: 4
+  include_project_commit_hash: true
+
 manual_run_boundary_overrides: []
 manual_steady_state_overrides: []
