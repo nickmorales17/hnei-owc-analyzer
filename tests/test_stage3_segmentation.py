@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -54,6 +55,12 @@ class Stage3SegmentationTests(unittest.TestCase):
         self.assertEqual([(b.start_row, b.end_row) for b in blocks], [(0, 1), (3, 4), (5, 6)])
         self.assertEqual([b.provisional_target_cycle_s for b in blocks], [5, 5, 6])
 
+    def test_decimal_recorded_target_remains_float(self):
+        data = pd.DataFrame({"Target_Cycle_s": [2.5, 2.5, np.nan, 3.0]})
+        blocks = group_recorded_targets(data, 0.01)
+        self.assertEqual(blocks[0].provisional_target_cycle_s, 2.5)
+        self.assertIsInstance(blocks[0].provisional_target_cycle_s, float)
+
     def test_active_blocks_idle_gaps_and_four_periods(self):
         data, _ = synthetic_four_blocks()
         blocks = detect_active_blocks(data, DT, CONFIG)
@@ -80,10 +87,33 @@ class Stage3SegmentationTests(unittest.TestCase):
         label, confidence = match_expected_period(6.5, 0.0, CONFIG)
         self.assertIsNone(label)
 
+    def test_decimal_inferred_target_is_not_rounded(self):
+        config = {**CONFIG, "expected_cycle_times_s": [2.0, 2.5, 3.0], "period_estimation": {**CONFIG["period_estimation"], "expected_match_tolerance_s": 0.35}}
+        label, confidence = match_expected_period(2.48, 0.95, config)
+        self.assertEqual(label, 2.5)
+        self.assertIsInstance(label, float)
+
     def test_manual_run_override(self):
         data, _ = synthetic_four_blocks(); config = {**CONFIG, "manual_run_boundary_overrides": [{"run_id": "manual_1", "start_row": 10, "end_row": 100}]}
         blocks = detect_active_blocks(data, DT, config)
         self.assertEqual((blocks[0].start_row, blocks[0].end_row, blocks[0].target_source), (10, 100, "manual"))
+
+    def test_file_beginning_partway_through_active_run_starts_at_zero(self):
+        time = np.arange(0, 30, DT)
+        data = pd.DataFrame({
+            "TimeStamp": pd.Timestamp("2026-01-01") + pd.to_timedelta(time, unit="s"),
+            "Encoder": 20*np.sin(2*np.pi*(time+1.7)/5),
+            "Pressure_1": 8*np.sin(2*np.pi*(time+1.4)/5),
+            "Pressure_2": 8*np.sin(2*np.pi*(time+1.4)/5),
+            "Torque": 2*np.sin(2*np.pi*(time+1.4)/5),
+        })
+        blocks = detect_active_blocks(data, DT, CONFIG)
+        self.assertEqual(blocks[0].start_row, 0)
+
+    def test_no_sample_specific_boundary_constants_in_source(self):
+        source = "\n".join(path.read_text(encoding="utf-8") for path in Path("src").glob("*.py"))
+        for boundary in [2116, 2335, 5511, 5669, 8731, 8957, 12390, 12729]:
+            self.assertNotIn(str(boundary), source)
 
     def test_startup_stopping_and_missing_startup(self):
         data, true_blocks = synthetic_four_blocks(); block = RunBlock("run_test", *true_blocks[1], "inferred")

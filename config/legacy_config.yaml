@@ -1,0 +1,16 @@
+# Legacy profile for the original HNEI 5–8 second tests.
+extends: default_config.yaml
+profile_name: legacy_5_to_8_second
+expected_cycle_times_s: [5.0, 6.0, 7.0, 8.0]
+period_estimation:
+  smoothing_window_s: 1.0
+  minimum_peak_spacing_s: 4.0
+  autocorrelation_min_period_s: 4.0
+  autocorrelation_max_period_s: 9.0
+vfd_command:
+  enabled: true
+  cycle_frequency_numerator: 120.0
+  command_frequency_offset_hz: 1.14
+  command_slope_hz_per_mv: 0.00626
+  command_min_mv: 0.0
+  command_max_mv: 4000.0

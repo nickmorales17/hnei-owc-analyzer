@@ -26,6 +26,16 @@ class LoadResult:
     warnings: list[str]
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def load_config(path: str | Path) -> dict[str, Any]:
     """Load and minimally validate a YAML configuration file."""
     config_path = Path(path)
@@ -33,6 +43,10 @@ def load_config(path: str | Path) -> dict[str, Any]:
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     with config_path.open("r", encoding="utf-8") as handle:
         config = yaml.safe_load(handle) or {}
+    parent = config.pop("extends", None)
+    if parent:
+        parent_path = (config_path.parent / str(parent)).resolve()
+        config = _deep_merge(load_config(parent_path), config)
     if not isinstance(config.get("column_aliases"), dict):
         raise ValueError("Configuration must define a 'column_aliases' mapping.")
     return config
@@ -139,4 +153,3 @@ def load_data_file(
         assumptions,
         warnings,
     )
-

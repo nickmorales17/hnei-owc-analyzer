@@ -1,4 +1,4 @@
-"""Command-line entry point for the HNEI OWC Stage 1–3 pipeline."""
+"""Command-line entry point for the HNEI OWC Stage 1–4 pipeline."""
 
 from __future__ import annotations
 
@@ -7,11 +7,14 @@ import logging
 from pathlib import Path
 import sys
 
+import numpy as np
 import pandas as pd
 
 from src.data_validation import validate_data
 from src.file_loader import load_config, load_data_file
-from src.plotting import create_stage3_diagnostics
+from src.cycle_analysis import analyze_encoder_cycles, classify_encoder_behavior
+from src.plotting import create_stage3_diagnostics, create_stage4_diagnostics
+from src.signal_processing import process_encoder
 from src.steady_state import annotate_operating_states, classify_steady_state
 from src.test_segmentation import (
     blocks_to_table,
@@ -21,6 +24,7 @@ from src.test_segmentation import (
     match_expected_period,
 )
 from src.utilities import prepare_output_directory
+from src.vfd_analysis import verify_vfd_run
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,7 +57,7 @@ def write_audit(audit: dict[str, object], path: Path) -> None:
 def run(args: argparse.Namespace) -> Path:
     output_dir = prepare_output_directory(args.output)
     configure_logging(output_dir / "run_log.txt", args.debug)
-    logging.info("Starting Stage 1–3 intake and detection pipeline")
+    logging.info("Starting Stage 1–4 intake, detection, cycle, and VFD pipeline")
     config = load_config(args.config)
     loaded = load_data_file(args.input, config, sheet=args.sheet, file_type=args.file_type)
     logging.info("Detected source columns: %s", ", ".join(loaded.source_columns))
@@ -75,6 +79,7 @@ def run(args: argparse.Namespace) -> Path:
     logging.info("Detected %d operating blocks", len(blocks))
 
     period_rows: list[dict[str, object]] = []
+    preliminary_by_run: dict[str, float] = {}
     detection_results = {}
     for block in blocks:
         if block.target_source == "recorded":
@@ -97,12 +102,57 @@ def run(args: argparse.Namespace) -> Path:
             "detection_confidence": block.detection_confidence,
             "target_source": block.target_source,
         })
+        preliminary_by_run[block.run_id] = float(estimate.get("selected_period_s", float("nan")))
         detection_results[block.run_id] = classify_steady_state(validated.data, block, sampling_interval, config)
         if detection_results[block.run_id][1]["startup_not_captured"]:
             message = "File/run begins during active operation; startup was not captured."
             block.detection_warnings = "; ".join(filter(None, [block.detection_warnings, message]))
 
     annotated = annotate_operating_states(validated.data, blocks, detection_results)
+    annotated["Encoder_Median_Filtered"] = np.nan
+    annotated["Encoder_Smoothed"] = np.nan
+    annotated["Encoder_Detrended"] = np.nan
+    annotated["Encoder_Spike_Flag"] = False
+    annotated["Final_Cycle_Number"] = pd.Series(pd.NA, index=annotated.index, dtype="Int64")
+    annotated["Cycle_Interval_Outlier_Flag"] = False
+    for column in ["Reconstructed_Target_VFD_Hz","Reconstructed_Command_mV_Uncapped","Reconstructed_Command_mV_Capped","Command_Equivalent_Frequency_Hz","Command_Equivalent_Cycle_s"]:
+        annotated[column] = np.nan
+    annotated["Command_Saturation_Flag"] = False
+
+    behavior_rows=[]; final_cycle_tables={}; method_tables=[]; summary_rows=[]; vfd_rows=[]; final_events={}
+    for block in blocks:
+        run_index=annotated.loc[block.start_row:block.end_row].index
+        target=float(block.provisional_target_cycle_s) if block.provisional_target_cycle_s is not None else float("nan")
+        timing_reference = target if np.isfinite(target) and target > 0 else preliminary_by_run[block.run_id]
+        run_processing=process_encoder(annotated.loc[run_index,"Encoder"],sampling_interval,config,timing_reference)
+        annotated.loc[run_index,"Encoder_Median_Filtered"]=run_processing.median_filtered
+        annotated.loc[run_index,"Encoder_Smoothed"]=run_processing.smoothed
+        annotated.loc[run_index,"Encoder_Detrended"]=run_processing.detrended
+        annotated.loc[run_index,"Encoder_Spike_Flag"]=run_processing.spike_flags
+        behavior={"Run_ID":block.run_id,**classify_encoder_behavior(annotated.loc[run_index,"Encoder"],run_processing.smoothed,sampling_interval),"spike_count":int(run_processing.spike_flags.sum()),"processing_warnings":"; ".join(run_processing.warnings)}; behavior_rows.append(behavior)
+        steady=annotated.loc[run_index][annotated.loc[run_index,"Is_Steady_State"]]
+        steady_processing=process_encoder(steady["Encoder"],sampling_interval,config,timing_reference)
+        cycles,methods,summary,events=analyze_encoder_cycles(block.run_id,steady,steady_processing,sampling_interval,timing_reference,config)
+        final_cycle_tables[block.run_id]=cycles; method_tables.append(methods); summary["Nominal_Target_Cycle_s"]=target; summary["Target_Source"]=block.target_source; summary_rows.append(summary); final_events[block.run_id]=events
+        if not cycles.empty:
+            steady_rows=steady.index.to_numpy()
+            for _,cycle in cycles.iterrows():
+                rows=steady_rows[int(cycle.Start_Local_Index):int(cycle.End_Local_Index)+1]
+                annotated.loc[rows,"Final_Cycle_Number"]=int(cycle.Cycle_Number); annotated.loc[rows,"Cycle_Interval_Outlier_Flag"]=bool(cycle.Interval_Outlier_Flag)
+        if np.isfinite(target) and target > 0:
+            vfd=verify_vfd_run(block.run_id,annotated.loc[run_index],target,block.target_source,float(summary["Final_Selected_Period_s"]),config,sampling_interval,int(summary["Valid_Interval_Count"]),float(summary["Valid_Peak_To_Peak_Range_s"]))
+        else:
+            final_period=summary["Final_Selected_Period_s"]
+            vfd={"Run_ID":block.run_id,"Nominal_Target_Cycle_s":np.nan,"Target_Source":"unclassified","VFD_Verification_Status":"unavailable_no_target","Desired_Target_Frequency_Hz":np.nan,"Reconstructed_Command_mV_Uncapped":np.nan,"Reconstructed_Command_mV_Capped":np.nan,"Command_Equivalent_Frequency_Hz":np.nan,"Command_Equivalent_Cycle_s":np.nan,"Command_Saturation_Flag":False,"Final_Measured_Cycle_s":final_period,"Final_Measured_Cycle_Frequency_Hz":1/final_period if np.isfinite(final_period) else np.nan,"Final_Measured_VFD_Equivalent_Frequency_Hz":np.nan,"Command_Interpretation":"VFD verification unavailable because no recorded or confidently inferred target is available."}
+        vfd_rows.append(vfd)
+        annotated.loc[run_index,"Reconstructed_Target_VFD_Hz"]=vfd["Desired_Target_Frequency_Hz"]
+        annotated.loc[run_index,"Reconstructed_Command_mV_Uncapped"]=vfd["Reconstructed_Command_mV_Uncapped"]
+        annotated.loc[run_index,"Reconstructed_Command_mV_Capped"]=vfd["Reconstructed_Command_mV_Capped"]
+        annotated.loc[run_index,"Command_Equivalent_Frequency_Hz"]=vfd["Command_Equivalent_Frequency_Hz"]
+        annotated.loc[run_index,"Command_Equivalent_Cycle_s"]=vfd["Command_Equivalent_Cycle_s"]
+        annotated.loc[run_index,"Command_Saturation_Flag"]=vfd["Command_Saturation_Flag"]
+
+    final_method_table=pd.concat(method_tables,ignore_index=True); final_summary_table=pd.DataFrame(summary_rows); vfd_table=pd.DataFrame(vfd_rows); behavior_table=pd.DataFrame(behavior_rows); final_intervals=pd.concat([table for table in final_cycle_tables.values() if not table.empty],ignore_index=True)
     annotated.to_csv(output_dir / "cleaned" / "full_annotated_data.csv", index=False)
     annotated.loc[annotated["Is_Steady_State"]].to_csv(output_dir / "cleaned" / "steady_state_data.csv", index=False)
     for block in blocks:
@@ -120,8 +170,15 @@ def run(args: argparse.Namespace) -> Path:
     period_table.to_csv(output_dir / "tables" / "preliminary_period_estimates.csv", index=False)
     steady_table.to_csv(output_dir / "tables" / "steady_state_selection.csv", index=False)
     pd.concat(cycle_tables, ignore_index=True).to_csv(output_dir / "tables" / "cycle_classification.csv", index=False) if cycle_tables else pd.DataFrame().to_csv(output_dir / "tables" / "cycle_classification.csv", index=False)
+    behavior_table.to_csv(output_dir/"tables"/"encoder_behavior_classification.csv",index=False)
+    final_intervals.to_csv(output_dir/"tables"/"encoder_cycle_intervals.csv",index=False)
+    final_method_table.to_csv(output_dir/"tables"/"encoder_cycle_method_comparison.csv",index=False)
+    final_summary_table.to_csv(output_dir/"tables"/"encoder_cycle_summary.csv",index=False)
+    vfd_table.to_csv(output_dir/"tables"/"vfd_command_verification.csv",index=False)
     graphs = create_stage3_diagnostics(annotated, blocks, detection_results, output_dir, config)
     logging.info("Created %d Stage 3 diagnostic graphs", len(graphs))
+    stage4_graphs=create_stage4_diagnostics(annotated,blocks,final_cycle_tables,final_method_table,final_summary_table,vfd_table,final_events,output_dir,config)
+    logging.info("Created %d Stage 4 diagnostic graphs",len(stage4_graphs))
 
     print("\nINTAKE AUDIT")
     print(f"Detected columns: {', '.join(column for column in loaded.data.columns if column != 'Original_Row_Order')}")
@@ -152,8 +209,12 @@ def run(args: argparse.Namespace) -> Path:
     for block, period in zip(blocks, period_rows):
         summary = detection_results[block.run_id][1]
         print(f"- {block.run_id}: rows {block.start_row}-{block.end_row}, preliminary period={period['selected_preliminary_period_s']:.3f} s, inferred target={block.provisional_target_cycle_s}, confidence={block.detection_confidence:.3f}, steady cycles={summary['steady_cycle_count']}")
+    print("Final encoder cycle and VFD verification:")
+    for summary,vfd in zip(summary_rows,vfd_rows):
+        capped = f"{vfd['Command_Equivalent_Cycle_s']:.3f} s" if pd.notna(vfd['Command_Equivalent_Cycle_s']) else "unavailable"
+        print(f"- {summary['Run_ID']}: final selected={summary['Final_Selected_Period_s']:.3f} s, valid interval mean={summary['Valid_Interval_Mean_s']:.3f} s, valid sample std={summary['Valid_Sample_Std_Cycle_s']:.4f} s, valid sample CV={summary['Valid_Sample_CV_Ratio']:.6f} ({summary['Valid_Sample_CV_Percent']:.3f}%), timing-method confidence={summary['Timing_Method_Confidence']:.3f}, capped expectation={capped}, saturation={vfd['Command_Saturation_Flag']}")
     print(f"Output directory: {output_dir}")
-    logging.info("Stage 1–3 pipeline complete")
+    logging.info("Stage 1–4 pipeline complete")
     return output_dir
 
 

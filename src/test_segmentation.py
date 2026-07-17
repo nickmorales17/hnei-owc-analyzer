@@ -36,7 +36,7 @@ def group_recorded_targets(data: pd.DataFrame, tolerance_s: float) -> list[RunBl
     start: int | None = None
     reference = np.nan
     for position, value in enumerate(targets):
-        active = pd.notna(value)
+        active = pd.notna(value) and float(value) > 0
         same = active and start is not None and abs(float(value) - float(reference)) <= tolerance_s
         if active and start is None:
             start, reference = position, float(value)
@@ -107,6 +107,17 @@ def detect_active_blocks(data: pd.DataFrame, sampling_interval_s: float, config:
     mask = binary_opening(mask, iterations=cleanup)
     minimum = seconds_to_samples(float(settings.get("minimum_active_duration_s", 8.0)), sampling_interval_s)
     raw_blocks = [(start, end) for start, end in _mask_blocks(mask) if end - start + 1 >= minimum]
+    # Centered rolling windows can trim an already-active file edge. Extend only
+    # when the first detected block is within one window and the leading encoder
+    # independently satisfies the configured activity rules.
+    if raw_blocks and raw_blocks[0][0] <= window and "Encoder" in data:
+        leading = data["Encoder"].iloc[:window].astype(float)
+        leading_active = (
+            leading.std() >= float(settings.get("encoder_std_threshold", 10.0))
+            or leading.max() - leading.min() >= float(settings.get("encoder_range_threshold", 35.0))
+        )
+        if leading_active:
+            raw_blocks[0] = (0, raw_blocks[0][1])
     return [RunBlock(f"run_{index:03d}", start, end, "inferred", signals_used=", ".join(used)) for index, (start, end) in enumerate(raw_blocks, 1)]
 
 
@@ -121,9 +132,14 @@ def estimate_preliminary_period(values: pd.Series, sampling_interval_s: float, c
     """Estimate repetition period using peak timing and autocorrelation."""
     settings = config.get("period_estimation", {})
     raw = pd.to_numeric(values, errors="coerce").interpolate(limit_direction="both").to_numpy(dtype=float)
-    window = seconds_to_samples(float(settings.get("smoothing_window_s", 1.0)), sampling_interval_s, 5)
+    expected = [float(value) for value in config.get("expected_cycle_times_s", []) if float(value) > 0]
+    reference_period = min(expected) if expected else float(settings.get("autocorrelation_min_period_s", 1.5))
+    smoothing_seconds = float(settings.get("smoothing_window_s", reference_period * float(settings.get("smoothing_cycle_fraction", 0.12))))
+    smoothing_seconds = min(float(settings.get("maximum_smoothing_window_s", 1.0)), max(float(settings.get("minimum_smoothing_window_s", 0.15)), smoothing_seconds))
+    window = seconds_to_samples(smoothing_seconds, sampling_interval_s, 5)
     processed = _smooth(raw, window)
-    distance = seconds_to_samples(float(settings.get("minimum_peak_spacing_s", 4.0)), sampling_interval_s)
+    spacing_seconds = float(settings.get("minimum_peak_spacing_s", reference_period * float(settings.get("minimum_peak_spacing_fraction", 0.55))))
+    distance = seconds_to_samples(spacing_seconds, sampling_interval_s)
     prominence = settings.get("peak_prominence", 60.0)
     peaks, _ = find_peaks(processed, prominence=prominence, distance=distance)
     peak_period = float(np.median(np.diff(peaks)) * sampling_interval_s) if len(peaks) >= 2 else np.nan
@@ -132,8 +148,8 @@ def estimate_preliminary_period(values: pd.Series, sampling_interval_s: float, c
     correlation = correlate(centered, centered, mode="full", method="fft")[len(centered) - 1 :]
     if correlation[0] > 0:
         correlation = correlation / correlation[0]
-    min_lag = seconds_to_samples(float(settings.get("autocorrelation_min_period_s", 4.0)), sampling_interval_s)
-    max_lag = min(len(correlation) - 1, seconds_to_samples(float(settings.get("autocorrelation_max_period_s", 9.0)), sampling_interval_s))
+    min_lag = seconds_to_samples(float(settings.get("autocorrelation_min_period_s", 1.5)), sampling_interval_s)
+    max_lag = min(len(correlation) - 1, seconds_to_samples(float(settings.get("autocorrelation_max_period_s", 10.0)), sampling_interval_s))
     local_peaks, _ = find_peaks(correlation[min_lag : max_lag + 1])
     if len(local_peaks):
         candidates = local_peaks + min_lag
@@ -143,10 +159,21 @@ def estimate_preliminary_period(values: pd.Series, sampling_interval_s: float, c
     else:
         autocorr_period, autocorr_strength = np.nan, 0.0
     available = [value for value in (peak_period, autocorr_period) if np.isfinite(value)]
-    selected = float(np.median(available)) if available else np.nan
+    if available and expected:
+        # Expected targets guide inference only: choose the independently measured
+        # method nearest a configured target instead of averaging a harmonic with
+        # a fundamental period.
+        selected = min(available, key=lambda value: min(abs(value-target) for target in expected))
+        selected_target_distance = min(abs(selected-target) for target in expected)
+    else:
+        selected = float(np.median(available)) if available else np.nan
+        selected_target_distance = np.nan
     difference = abs(peak_period - autocorr_period) if np.isfinite(peak_period) and np.isfinite(autocorr_period) else np.nan
     method_agreement = max(0.0, 1.0 - difference / 1.0) if np.isfinite(difference) else 0.35 if available else 0.0
     confidence = float(np.clip(0.6 * method_agreement + 0.4 * autocorr_strength, 0, 1))
+    if np.isfinite(selected_target_distance):
+        target_tolerance = float(settings.get("expected_match_tolerance_s", 0.75))
+        confidence = max(confidence, float(np.clip(0.5 + 0.5*(1-selected_target_distance/target_tolerance), 0, 1)))
     return {
         "peak_period_s": peak_period,
         "autocorrelation_period_s": autocorr_period,

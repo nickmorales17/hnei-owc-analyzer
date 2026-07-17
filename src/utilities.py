@@ -19,6 +19,6 @@ def prepare_output_directory(requested: str | Path | None, root: str | Path = "o
         candidate = Path(requested)
         if candidate.exists() and any(candidate.iterdir()):
             raise FileExistsError(f"Output directory is not empty; refusing to overwrite: {candidate}")
-    for child in (candidate / "cleaned", candidate / "tables", candidate / "graphs" / "stage3_diagnostics"):
+    for child in (candidate / "cleaned", candidate / "tables", candidate / "graphs" / "stage3_diagnostics", candidate / "graphs" / "stage4_diagnostics"):
         child.mkdir(parents=True, exist_ok=True)
     return candidate

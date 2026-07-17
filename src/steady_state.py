@@ -38,9 +38,14 @@ def classify_steady_state(
     segment = data.loc[block.start_row : block.end_row]
     encoder = segment["Encoder"].interpolate(limit_direction="both").to_numpy(dtype=float)
     period_settings = config.get("period_estimation", {})
-    window = seconds_to_samples(float(period_settings.get("smoothing_window_s", 1.0)), sampling_interval_s, 5)
+    expected = [float(value) for value in config.get("expected_cycle_times_s", []) if float(value) > 0]
+    reference_period = min(expected) if expected else float(period_settings.get("autocorrelation_min_period_s", 1.5))
+    smoothing_seconds = float(period_settings.get("smoothing_window_s", reference_period * float(period_settings.get("smoothing_cycle_fraction", 0.12))))
+    smoothing_seconds = min(float(period_settings.get("maximum_smoothing_window_s", 1.0)), max(float(period_settings.get("minimum_smoothing_window_s", 0.15)), smoothing_seconds))
+    window = seconds_to_samples(smoothing_seconds, sampling_interval_s, 5)
     processed = _smooth(encoder, window)
-    distance = seconds_to_samples(float(period_settings.get("minimum_peak_spacing_s", 4.0)), sampling_interval_s)
+    spacing_seconds = float(period_settings.get("minimum_peak_spacing_s", reference_period * float(period_settings.get("minimum_peak_spacing_fraction", 0.55))))
+    distance = seconds_to_samples(spacing_seconds, sampling_interval_s)
     peaks, _ = find_peaks(processed, prominence=period_settings.get("peak_prominence", 60.0), distance=distance)
     global_peaks = peaks + block.start_row
     cycle_rows: list[dict[str, Any]] = []

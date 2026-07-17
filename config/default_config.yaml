@@ -56,7 +56,12 @@ filtering:
   enabled: true
   median_window_s: 0.06
   savgol_window_s: 0.60
+  savgol_cycle_fraction: 0.12
+  savgol_min_window_s: 0.15
+  savgol_max_window_s: 1.00
   savgol_polynomial_order: 3
+  detrend_enabled: false
+  spike_mad_threshold: 6.0
   butterworth_enabled: false
   butterworth_cutoff_hz: 3.0
   butterworth_order: 4
@@ -85,23 +90,39 @@ activity_detection:
   edge_cleanup_s: 0.25
 
 period_estimation:
-  smoothing_window_s: 1.0
+  smoothing_cycle_fraction: 0.12
+  minimum_smoothing_window_s: 0.15
+  maximum_smoothing_window_s: 1.0
   peak_prominence: 60.0
-  minimum_peak_spacing_s: 4.0
-  autocorrelation_min_period_s: 4.0
-  autocorrelation_max_period_s: 9.0
+  minimum_peak_spacing_fraction: 0.55
+  autocorrelation_min_period_s: 1.5
+  autocorrelation_max_period_s: 10.0
   expected_match_tolerance_s: 0.75
 
 encoder:
-  peak_prominence: null
-  minimum_peak_spacing_fraction: 0.50
+  peak_prominence: 60.0
+  trough_prominence: 60.0
+  minimum_peak_spacing_fraction: 0.60
+  zero_crossing_direction: rising
+  autocorrelation_min_period_s: 1.5
+  autocorrelation_max_period_s: 10.0
+  fft_min_period_s: 1.5
+  fft_max_period_s: 10.0
+  cycle_interval_outlier_rule: relative_deviation
+  cycle_interval_deviation_tolerance: 0.10
+  minimum_valid_intervals: 4
+  method_agreement_tolerance_fraction: 0.05
+  timing_confidence_threshold: 0.60
 
 vfd_command:
-  frequency_numerator: 120.0
-  intercept_hz: 1.14
-  slope_hz_per_mv: 0.00626
-  minimum_mv: 0.0
-  maximum_mv: 4000.0
+  enabled: true
+  cycle_frequency_numerator: 120.0
+  command_frequency_offset_hz: 1.14
+  command_slope_hz_per_mv: 0.00626
+  command_min_mv: 0.0
+  command_max_mv: 4000.0
+  recorded_frequency_tolerance_hz: 0.05
+  recorded_command_tolerance_mv: 5.0
 
 plotting:
   dpi: 180

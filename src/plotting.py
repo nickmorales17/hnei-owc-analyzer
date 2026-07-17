@@ -70,3 +70,33 @@ def create_stage3_diagnostics(data: pd.DataFrame, blocks: list[RunBlock], result
             ax.grid(alpha=0.25); ax.legend(fontsize=7, ncol=3)
             path = graph_dir / f"{block.run_id}_{suffix}.png"; fig.tight_layout(); fig.savefig(path, dpi=dpi); plt.close(fig); created.append(path)
     return created
+
+
+def create_stage4_diagnostics(data: pd.DataFrame, blocks: list[RunBlock], cycle_tables: dict[str, pd.DataFrame], method_table: pd.DataFrame, summary_table: pd.DataFrame, vfd_table: pd.DataFrame, event_indices: dict[str, dict[str, np.ndarray]], output_dir: Path, config: dict[str, Any]) -> list[Path]:
+    """Create only the plots needed to verify Stage 4 timing and commands."""
+    graph_dir = output_dir / "graphs" / "stage4_diagnostics"; graph_dir.mkdir(parents=True, exist_ok=True)
+    dpi = int(config.get("plotting", {}).get("dpi", 180)); elapsed = _elapsed(data); created: list[Path] = []
+    for block in blocks:
+        segment = data.loc[block.start_row:block.end_row]
+        fig, ax = plt.subplots(figsize=(10,4)); ax.plot(elapsed.loc[segment.index],segment["Encoder"],lw=.55,label="Encoder raw (recorded)"); ax.plot(elapsed.loc[segment.index],segment["Encoder_Median_Filtered"],lw=.8,label="Median filtered"); ax.plot(elapsed.loc[segment.index],segment["Encoder_Smoothed"],lw=1.1,label="Savitzky-Golay timing signal"); ax.set(title=f"{block.run_id} raw and processed encoder",xlabel="Elapsed time (s)",ylabel="Encoder (recorded units)"); ax.grid(alpha=.25); ax.legend(fontsize=7); path=graph_dir/f"{block.run_id}_raw_filtered_encoder.png"; fig.tight_layout(); fig.savefig(path,dpi=dpi); plt.close(fig); created.append(path)
+        steady = segment[segment["Is_Steady_State"]]
+        if len(steady):
+            events=event_indices.get(block.run_id,{}); fig,ax=plt.subplots(figsize=(10,4)); ax.plot(elapsed.loc[steady.index],steady["Encoder_Smoothed"],label="Filtered encoder")
+            for key,color,marker in [("peaks","red","^"),("troughs","blue","v")]:
+                local=events.get(key,np.array([],dtype=int)); global_rows=steady.index.to_numpy()[local] if len(local) else np.array([],dtype=int); ax.scatter(elapsed.loc[global_rows],steady.loc[global_rows,"Encoder_Smoothed"],c=color,marker=marker,s=28,label=f"Detected {key}")
+            ax.set(title=f"{block.run_id} steady-state peaks and troughs",xlabel="Elapsed time (s)",ylabel="Filtered encoder (recorded units)"); ax.grid(alpha=.25); ax.legend(); path=graph_dir/f"{block.run_id}_peaks_troughs.png"; fig.tight_layout(); fig.savefig(path,dpi=dpi); plt.close(fig); created.append(path)
+        cycles=cycle_tables.get(block.run_id,pd.DataFrame()); fig,ax=plt.subplots(figsize=(8,4))
+        if not cycles.empty:
+            colors=np.where(cycles.Interval_Outlier_Flag,"red","#2a9d8f"); ax.scatter(cycles.Cycle_Number,cycles.Measured_Cycle_s,c=colors,label="Cycle interval"); ax.axhline(cycles.Measured_Cycle_s.median(),ls="--",color="black",label="Run median")
+        summary_row = summary_table.loc[summary_table.Run_ID == block.run_id]
+        cv_label = ""
+        if not summary_row.empty:
+            cv_label = f" — valid sample CV {summary_row.Valid_Sample_CV_Ratio.iloc[0]:.6f} ({summary_row.Valid_Sample_CV_Percent.iloc[0]:.3f}%)"
+        ax.set(title=f"{block.run_id} measured cycle intervals{cv_label}",xlabel="Cycle number",ylabel="Measured cycle time (s)"); ax.grid(alpha=.25); ax.legend(); path=graph_dir/f"{block.run_id}_cycle_intervals.png"; fig.tight_layout(); fig.savefig(path,dpi=dpi); plt.close(fig); created.append(path)
+    pivot=method_table.pivot(index="Run_ID",columns="method",values="period_s"); fig,ax=plt.subplots(figsize=(9,4)); pivot.plot(kind="bar",ax=ax); ax.set(title="Final encoder period estimates by method",xlabel="Run ID",ylabel="Period (s)"); ax.grid(axis="y",alpha=.25); path=graph_dir/"method_period_comparison.png"; fig.tight_layout(); fig.savefig(path,dpi=dpi); plt.close(fig); created.append(path)
+    merged=vfd_table.merge(summary_table[["Run_ID","Final_Selected_Period_s"]],on="Run_ID",how="left"); x=np.arange(len(merged)); labels=merged.Run_ID
+    for columns,title,ylabel,filename in [(["Nominal_Target_Cycle_s","Command_Equivalent_Cycle_s","Final_Selected_Period_s"],"Final selected period versus nominal and capped-command cycle","Cycle time (s)","cycle_target_comparison.png"),(["Desired_Target_Frequency_Hz","Command_Equivalent_Frequency_Hz","Final_Measured_VFD_Equivalent_Frequency_Hz"],"Desired, equivalent, and measured VFD-equivalent frequency","VFD-equivalent frequency (Hz)","frequency_comparison.png"),(["Reconstructed_Command_mV_Uncapped","Reconstructed_Command_mV_Capped"],"Reconstructed uncapped and capped command","Command (mV)","command_voltage_comparison.png")]:
+        fig,ax=plt.subplots(figsize=(9,4)); width=.8/len(columns)
+        for i,column in enumerate(columns): ax.bar(x+(i-(len(columns)-1)/2)*width,merged[column],width,label=column)
+        ax.set_xticks(x,labels); ax.set(title=title,xlabel="Run ID",ylabel=ylabel); ax.grid(axis="y",alpha=.25); ax.legend(fontsize=7); path=graph_dir/filename; fig.tight_layout(); fig.savefig(path,dpi=dpi); plt.close(fig); created.append(path)
+    return created
