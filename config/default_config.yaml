@@ -1,0 +1,88 @@
+# Default configuration for the HNEI OWC analyzer.
+expected_cycle_times_s: [8, 7, 6, 5]
+
+column_aliases:
+  TimeStamp: [timestamp, time_stamp, time, datetime, date_time]
+  RecNum: [recnum, rec_num, record, record_number, recordnumber]
+  Pressure_1: [pressure_1, pressure1, p1, press_1]
+  Pressure_2: [pressure_2, pressure2, p2, press_2]
+  Pressure_3: [pressure_3, pressure3, p3, press_3]
+  Pressure_4: [pressure_4, pressure4, p4, press_4]
+  Torque: [torque, shaft_torque]
+  Encoder: [encoder, encoder_position, position]
+  Gen_V: [gen_v, genv, generator_voltage, generator_v]
+  Target_Cycle_s: [target_cycle_s, target_cycle, cycle_target_s]
+  Target_VFD_Hz: [target_vfd_hz, vfd_target_hz, target_frequency_hz]
+  VFD_Command_mV: [vfd_command_mv, command_mv, vfd_mv]
+  Run_ID: [run_id, run, test_run]
+
+required_columns: [TimeStamp]
+numeric_columns:
+  - RecNum
+  - Pressure_1
+  - Pressure_2
+  - Pressure_3
+  - Pressure_4
+  - Torque
+  - Encoder
+  - Gen_V
+  - Target_Cycle_s
+  - Target_VFD_Hz
+  - VFD_Command_mV
+
+sensor_layout:
+  Pressure_1: {location: upstream, pair: Pressure_2}
+  Pressure_2: {location: upstream, pair: Pressure_1}
+  Pressure_3: {location: downstream, pair: Pressure_4}
+  Pressure_4: {location: downstream, pair: Pressure_3}
+
+sensor_units:
+  Pressure_1: Pa
+  Pressure_2: Pa
+  Pressure_3: Pa
+  Pressure_4: Pa
+  Torque: unknown
+  Encoder: unknown
+  Gen_V: V
+
+validation:
+  timing_gap_factor: 3.0
+  sampling_jitter_relative_threshold: 0.10
+  units_row_min_text_fraction: 0.50
+
+filtering:
+  enabled: true
+  median_window_s: 0.06
+  savgol_window_s: 0.60
+  savgol_polynomial_order: 3
+  butterworth_enabled: false
+  butterworth_cutoff_hz: 3.0
+  butterworth_order: 4
+
+quality_thresholds:
+  spike_z_threshold: 6.0
+  sampling_gap_factor: 3.0
+  maximum_lag_cycle_fraction: 0.50
+
+steady_state:
+  period_tolerance_fraction: 0.05
+  amplitude_tolerance_fraction: 0.10
+  minimum_steady_cycles: 5
+
+encoder:
+  peak_prominence: null
+  minimum_peak_spacing_fraction: 0.50
+
+vfd_command:
+  frequency_numerator: 120.0
+  intercept_hz: 1.14
+  slope_hz_per_mv: 0.00626
+  minimum_mv: 0.0
+  maximum_mv: 4000.0
+
+plotting:
+  dpi: 180
+  formats: [png]
+
+manual_run_boundary_overrides: []
+
