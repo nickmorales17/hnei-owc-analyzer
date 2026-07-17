@@ -1,0 +1,45 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Testing and analysis cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# VS Code local settings
+.vscode/
+
+# macOS files
+.DS_Store
+
+# Input test data
+input/*
+!input/.gitkeep
+
+# Generated analysis outputs
+output/*
+!output/.gitkeep
+
+# Excel temporary files
+~$*.xlsx
+~$*.xls
+
+# Logs
+*.log
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Build and packaging files
+build/
+dist/
+*.egg-info/
