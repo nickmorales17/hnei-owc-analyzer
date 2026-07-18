@@ -18,7 +18,7 @@ STATE_COLORS = {"idle": "0.8", "startup_transient": "#f4a261", "steady_state": "
 
 
 def _elapsed(data: pd.DataFrame) -> pd.Series:
-    return (data["TimeStamp"] - data["TimeStamp"].iloc[0]).dt.total_seconds()
+    return data["Elapsed_Time_s"] - data["Elapsed_Time_s"].iloc[0]
 
 
 def _shade_runs(axis: plt.Axes, data: pd.DataFrame, blocks: list[RunBlock]) -> None:
@@ -152,12 +152,12 @@ def create_final_graph_package(data:pd.DataFrame,blocks:list[RunBlock],tables:di
     def save(fig,name,category):
         path=dirs[category]/name; fig.tight_layout(); fig.savefig(path,dpi=dpi); plt.close(fig); created.append(path)
     def shade(ax,run):
-        x=(run.TimeStamp-run.TimeStamp.iloc[0]).dt.total_seconds()
+        x=run.Elapsed_Time_s-run.Elapsed_Time_s.iloc[0]
         for state,color in STATE_COLORS.items():
             rows=run.index[run.Operating_State==state] if "Operating_State" in run else []
             if len(rows): ax.axvspan(x.loc[rows[0]],x.loc[rows[-1]],color=color,alpha=.10)
     for block in blocks:
-        run=data.loc[block.start_row:block.end_row]; x=(run.TimeStamp-run.TimeStamp.iloc[0]).dt.total_seconds(); prefix=block.run_id
+        run=data.loc[block.start_row:block.end_row]; x=run.Elapsed_Time_s-run.Elapsed_Time_s.iloc[0]; prefix=block.run_id
         specs=[(["Pressure_1","Pressure_2","Pressure_3","Pressure_4"],"pressure_channels","Pressure channels"),(["Upstream_Mean","Downstream_Mean"],"pressure_means","Upstream/downstream means"),(["Turbine_DeltaP_Dynamic"],"dynamic_delta_p","Dynamic turbine differential pressure"),(["Torque","Torque_Filtered"],"torque","Torque raw and filtered"),(["Encoder","Encoder_Smoothed"],"encoder","Encoder raw and processed"),(["Gen_V"],"generator_voltage","Gen_V and fitted drift")]
         for columns,suffix,title in specs:
             available=[c for c in columns if c in run]
@@ -205,7 +205,7 @@ def create_final_graph_package(data:pd.DataFrame,blocks:list[RunBlock],tables:di
         fig,ax=plt.subplots(figsize=(8,4)); ax.bar(torque_phase.Run_ID+"\n"+torque_phase.Relationship,torque_phase.Phase_Deg); ax.set(title="Torque phase relationships",ylabel="Wrapped phase (degrees)"); ax.tick_params(axis="x",rotation=45,labelsize=6); ax.grid(axis="y",alpha=.25); save(fig,"torque_phase_relationships.png","correlation")
     from .pressure_analysis import lagged_cross_correlation
     from .correlation_analysis import phase_relationship
-    sampling=float(data.TimeStamp.diff().dt.total_seconds().median())
+    sampling=float(data.Elapsed_Time_s.diff().median())
     for run_id,run in steady[steady.Run_ID.astype(str).ne("")].groupby("Run_ID"):
         period=float(cross.loc[cross.Run_ID==run_id,"Final_Selected_Period_s"].iloc[0]); max_lag=max(1,int(round(.5*period/sampling)))
         if {"Upstream_Dynamic","Downstream_Dynamic"}.issubset(run.columns):
@@ -221,7 +221,7 @@ def create_final_graph_package(data:pd.DataFrame,blocks:list[RunBlock],tables:di
     if not consistency.empty:
         offsets=tables["pressure_pairs"][(tables["pressure_pairs"].Pair=="downstream_pair")&(tables["pressure_pairs"].Data_Version=="raw")]; fig,ax=plt.subplots(figsize=(7,4)); ax.bar(offsets.Run_ID,offsets.Mean_Offset); ax.set(title="Downstream sensor offset by run",ylabel="Pressure_4 − Pressure_3 (unknown units)"); save(fig,"downstream_sensor_offset.png","quality")
     gen=tables["generator"]; fig,ax=plt.subplots(figsize=(8,4)); ax.bar(gen.Run_ID,gen.Linear_Drift_Per_s,label="Drift slope"); ax2=ax.twinx(); ax2.plot(gen.Run_ID,gen.Drift_R_Squared,"o--",color="black",label="R²"); ax.set(title="Gen_V drift slope and fit",ylabel="Slope (V/s)"); ax2.set_ylabel("R²"); save(fig,"gen_v_drift_quality.png","quality")
-    intervals=data.TimeStamp.diff().dt.total_seconds().dropna(); fig,ax=plt.subplots(figsize=(7,4)); ax.hist(intervals,bins=30); ax.set(title="Sampling interval distribution",xlabel="Interval (s)",ylabel="Count"); save(fig,"sampling_interval_histogram.png","quality")
+    intervals=data.Elapsed_Time_s.diff().dropna(); fig,ax=plt.subplots(figsize=(7,4)); ax.hist(intervals,bins=30); ax.set(title="Sample interval distribution" if data.Time_Source.iloc[0] != "reconstructed_from_record_number" else "Record-step interval distribution (assumed time base)",xlabel="Interval (s)",ylabel="Count"); save(fig,"sampling_interval_histogram.png","quality")
     cycles=tables["encoder_intervals"]; fig,ax=plt.subplots(figsize=(8,4));
     for run_id,group in cycles.groupby("Run_ID"): ax.plot(group.Cycle_Number,group.Measured_Cycle_s,"o-",label=run_id)
     ax.set(title="Cycle-period variation by run",xlabel="Cycle number",ylabel="Measured cycle (s)"); ax.legend(); ax.grid(alpha=.25); save(fig,"cycle_period_variation.png","quality")

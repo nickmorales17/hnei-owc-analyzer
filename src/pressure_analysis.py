@@ -111,7 +111,8 @@ def analyze_pressure_pairs(data: pd.DataFrame, run_periods: dict[str,float], sam
                 pearson=float(pearsonr(x,y).statistic) if len(pair)>=3 and x.std()>0 and y.std()>0 else np.nan; spearman=float(spearmanr(x,y).statistic) if len(pair)>=3 else np.nan
                 lag=lagged_cross_correlation(x,y,max_lag); lag_seconds=float(lag["lag_samples"]*sampling_interval_s) if np.isfinite(lag["lag_samples"]) else np.nan; phase=wrap_phase_degrees(360*lag_seconds/period) if np.isfinite(period) and np.isfinite(lag_seconds) else np.nan
                 x_ptp=float(x.max()-x.min()); y_ptp=float(y.max()-y.min()); x_rms=float(np.sqrt(np.mean(x*x))); y_rms=float(np.sqrt(np.mean(y*y)))
-                cycles=float((steady.TimeStamp.max()-steady.TimeStamp.min()).total_seconds()/period) if np.isfinite(period) and period>0 and len(steady)>1 else 0
+                duration=(steady.Elapsed_Time_s.max()-steady.Elapsed_Time_s.min()) if "Elapsed_Time_s" in steady else (steady.TimeStamp.max()-steady.TimeStamp.min()).total_seconds()
+                cycles=float(duration/period) if np.isfinite(period) and period>0 and len(steady)>1 else 0
                 reasons=[]
                 if cycles<float(settings.get("minimum_lag_analysis_cycles",2)): reasons.append(f"only {cycles:.2f} measured cycles")
                 if not np.isfinite(lag["maximum_correlation"]) or abs(lag["maximum_correlation"])<float(settings.get("lag_reliable_correlation",.6)): reasons.append("weak maximum lagged correlation")

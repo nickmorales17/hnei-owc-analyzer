@@ -69,7 +69,7 @@ def apply_quality_checks(data: pd.DataFrame, sampling_interval_s: float, config:
             if std <= float(settings.get("near_constant_std", 1e-6)):
                 findings.append(_finding(run_id, signal, "near_constant_signal", "review", f"population standard deviation={std:.6g}"))
             if len(x) >= 3:
-                t = (result.loc[x.index, "TimeStamp"] - result.loc[x.index[0], "TimeStamp"]).dt.total_seconds()
+                t = (result.loc[x.index, "Elapsed_Time_s"] - result.loc[x.index[0], "Elapsed_Time_s"]) if "Elapsed_Time_s" in result else (result.loc[x.index, "TimeStamp"] - result.loc[x.index[0], "TimeStamp"]).dt.total_seconds()
                 slope = float(linregress(t, x).slope) if np.ptp(t) > 0 else np.nan
                 fitted_change = slope * float(t.iloc[-1] - t.iloc[0]) if np.isfinite(slope) else np.nan
                 scale = max(float(np.ptp(x)), abs(float(x.mean())), 1e-12)

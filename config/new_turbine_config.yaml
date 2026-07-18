@@ -1,7 +1,7 @@
 # New-turbine profile. VFD scaling is intentionally unavailable until verified.
 extends: default_config.yaml
-profile_name: new_turbine_2_to_3_second
-expected_cycle_times_s: [2.0, 2.5, 3.0]
+profile_name: new_turbine_2_to_5_second
+expected_cycle_times_s: [5.0, 4.0, 3.0, 2.5, 2.0]
 period_estimation:
   expected_match_tolerance_s: 0.35
 activity_detection:
@@ -10,6 +10,8 @@ activity_detection:
   block_merge_gap_s: 0.35
 encoder:
   minimum_valid_intervals: 4
+intake:
+  fallback_sample_interval_s: 0.012
 vfd_command:
   enabled: false
   cycle_frequency_numerator: null

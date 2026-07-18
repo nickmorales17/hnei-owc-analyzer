@@ -58,6 +58,12 @@ def create_markdown_reports(output_dir:Path,context:dict[str,Any],config:dict[st
     """Write the four report-ready Markdown deliverables."""
     report_dir=output_dir/"report"; report_dir.mkdir(parents=True,exist_ok=True); cross=context["cross_test"]
     audit=context["audit"]; metadata=context["metadata"]; generator=context["tables"]["generator"]; pressure=context["tables"]["pressure_response"]
+    if audit.get("time_reconstructed_flag"):
+        time_statement=(f"Elapsed time was reconstructed from record numbers using an assumed fixed sample interval of {_fmt(audit.get('assumed_sample_interval_s'),6)} s. Absolute date and timestamp range are unavailable. Measured sampling jitter is unavailable and cannot be evaluated without recorded timestamps. Record-number gaps are retained. Lag, phase, frequency, period, and drift-per-second results depend on the assumed fixed interval.")
+    elif audit.get("time_source") == "recorded_elapsed_time":
+        time_statement="The recorded numeric Elapsed_Time_s axis was used. Absolute date and timestamp range are unavailable; sampling jitter cannot be evaluated without recorded timestamps."
+    else:
+        time_statement="Recorded timestamps were used; the absolute timestamp range and measured sampling jitter are available in the intake audit."
     conditions=_condition_markdown(cross); n=len(cross)
     vfd_unavailable=bool("VFD_Verification_Status" in cross and cross.VFD_Verification_Status.astype(str).str.contains("unavailable").any())
     fastest=cross.sort_values("Final_Selected_Period_s").iloc[0] if n else None
@@ -67,6 +73,8 @@ def create_markdown_reports(output_dir:Path,context:dict[str,Any],config:dict[st
 ## 1. Test and data overview
 
 Input `{metadata['input_filename']}` contained {metadata['total_records']:,} records from {audit['timestamp_start']} through {audit['timestamp_end']}. The median sampling interval was {_fmt(audit['sampling_interval_median_s'],6)} s. Available channels were {', '.join(metadata['available_channels'])}; pressure and torque units remain unknown. Profile: `{metadata['configuration_profile']}`.
+
+{time_statement}
 
 ## 2. Data-processing methods
 
@@ -126,7 +134,7 @@ Input SHA-256: `{metadata['input_sha256']}`. Configuration SHA-256: `{metadata['
 """
     methods="""# Methods
 
-Data were imported in Python using pandas, with configurable column-alias mapping and timestamp conversion for CSV and Excel sources. NumPy and SciPy were used to characterize sampling, segment operating runs, identify steady-state portions, filter encoder data, and calculate peak-, trough-, autocorrelation-, FFT-, and zero-crossing-based cycle estimates. Final timing selection retained cycle-level intervals and method-agreement evidence separately.
+Data were imported in Python using pandas, with configurable column-alias mapping and timestamp conversion for CSV and Excel sources. Time-base selection prioritized recorded TimeStamp, recorded numeric Elapsed_Time_s, then validated RecNum reconstruction with an explicit fixed interval. {time_statement} NumPy and SciPy were used to characterize sampling, segment operating runs, identify steady-state portions, filter encoder data, and calculate peak-, trough-, autocorrelation-, FFT-, and zero-crossing-based cycle estimates. Final timing selection retained cycle-level intervals and method-agreement evidence separately.
 
 Pressure means, differential channels, run-centered dynamic channels, robust percentile spans, cycle amplitudes, correlations, signed lag, and wrapped phase were calculated only when the required channels were available. Positive lag denotes that the second signal occurs after the first. Torque and generator-voltage statistics were evaluated at sample, cycle, and run-summary levels as applicable. Gen_V drift and periodicity were classified independently. Quality checks used configurable robust filters and retained raw values alongside clearly named processed columns.
 
@@ -148,6 +156,7 @@ Priority actions are to verify pressure calibration and downstream wiring, recor
 
 ## Confirmed limitations
 
+- {time_statement}
 - Pressure and torque units and pressure calibration are undocumented.
 - Recorded VFD command and measured VFD output frequency are unavailable.
 - Gen_V channel meaning is undocumented.

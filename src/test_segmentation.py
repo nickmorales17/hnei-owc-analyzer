@@ -199,12 +199,15 @@ def match_expected_period(estimated_s: float, period_confidence: float, config: 
 
 def blocks_to_table(blocks: list[RunBlock], data: pd.DataFrame) -> pd.DataFrame:
     rows = []
+    elapsed = data["Elapsed_Time_s"] if "Elapsed_Time_s" in data else (data["TimeStamp"] - data["TimeStamp"].iloc[0]).dt.total_seconds()
     for block in blocks:
         row = asdict(block)
         row.update({
-            "start_timestamp": data.loc[block.start_row, "TimeStamp"],
-            "end_timestamp": data.loc[block.end_row, "TimeStamp"],
-            "duration_s": (data.loc[block.end_row, "TimeStamp"] - data.loc[block.start_row, "TimeStamp"]).total_seconds(),
+            "start_timestamp": data.loc[block.start_row, "TimeStamp"] if "TimeStamp" in data else None,
+            "end_timestamp": data.loc[block.end_row, "TimeStamp"] if "TimeStamp" in data else None,
+            "start_elapsed_time_s": elapsed.loc[block.start_row],
+            "end_elapsed_time_s": elapsed.loc[block.end_row],
+            "duration_s": float(elapsed.loc[block.end_row] - elapsed.loc[block.start_row]),
             "sample_count": block.end_row - block.start_row + 1,
         })
         rows.append(row)

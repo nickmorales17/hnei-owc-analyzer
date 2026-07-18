@@ -11,8 +11,9 @@ class ConfigurationProfileTests(unittest.TestCase):
 
     def test_new_turbine_profile_preserves_decimal_and_disables_vfd(self):
         config = load_config("config/new_turbine_config.yaml")
-        self.assertEqual(config["expected_cycle_times_s"], [2.0, 2.5, 3.0])
-        self.assertIsInstance(config["expected_cycle_times_s"][1], float)
+        self.assertEqual(config["expected_cycle_times_s"], [5.0, 4.0, 3.0, 2.5, 2.0])
+        self.assertIsInstance(config["expected_cycle_times_s"][3], float)
+        self.assertEqual(config["intake"]["fallback_sample_interval_s"], 0.012)
         self.assertFalse(config["vfd_command"]["enabled"])
         self.assertIsNone(config["vfd_command"]["command_slope_hz_per_mv"])
 

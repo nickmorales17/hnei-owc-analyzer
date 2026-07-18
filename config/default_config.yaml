@@ -5,6 +5,7 @@ inferred_label_confidence_threshold: 0.65
 
 column_aliases:
   TimeStamp: [timestamp, time_stamp, time, datetime, date_time]
+  Elapsed_Time_s: [elapsed_time_s, elapsed_time, elapsed_seconds]
   RecNum: [recnum, rec_num, record, record_number, recordnumber]
   Pressure_1: [pressure_1, pressure1, p1, press_1]
   Pressure_2: [pressure_2, pressure2, p2, press_2]
@@ -19,6 +20,8 @@ column_aliases:
   Run_ID: [run_id, run, test_run]
 
 required_columns: [TimeStamp]
+intake:
+  fallback_sample_interval_s: null
 numeric_columns:
   - RecNum
   - Pressure_1

@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="config/default_config.yaml")
     parser.add_argument("--sheet", help="Excel worksheet name")
     parser.add_argument("--file-type", default="auto", choices=["auto", "csv", "xlsx", "xls"])
+    parser.add_argument("--sample-interval-s", type=float, help="Fixed sample interval in seconds for RecNum-based reconstruction")
     parser.add_argument("--show-plots", action="store_true", help="Plots are saved; interactive display remains disabled")
     parser.add_argument("--no-smoothing", action="store_true", help="Reserved for later signal-analysis stages")
     parser.add_argument("--debug", action="store_true")
@@ -79,7 +80,10 @@ def run(args: argparse.Namespace) -> Path:
     for message in loaded.warnings:
         logging.warning(message)
 
-    validated = validate_data(loaded.data, config)
+    validated = validate_data(loaded.data, config, args.sample_interval_s)
+    logging.info("Time source: %s", validated.audit["time_source"])
+    if validated.audit["time_reconstructed_flag"]:
+        logging.warning("Elapsed time reconstructed from RecNum at %.9g s/sample; absolute timestamps and measured jitter are unavailable; timing-derived results depend on this assumption.", validated.audit["assumed_sample_interval_s"])
     for message in validated.warnings:
         logging.warning(message)
     sampling_interval = float(validated.audit["sampling_interval_median_s"])
@@ -175,6 +179,9 @@ def run(args: argparse.Namespace) -> Path:
     torque_phase_table=torque_phase_summary(annotated,run_periods,sampling_interval,config)
     generator_table=generator_summary(annotated,run_periods,config)
     correlation_table=correlation_regression_summary(annotated,cycle_level_table,torque_table,generator_table,pressure_response_table,int(config.get("stage5",{}).get("minimum_regression_observations",3)))
+    time_fields={"Time_Source":validated.audit["time_source"],"Time_Reconstructed_Flag":validated.audit["time_reconstructed_flag"],"Assumed_Sample_Interval_s":validated.audit["assumed_sample_interval_s"]}
+    for table in [final_summary_table,final_method_table,final_intervals,pressure_pair_table,torque_phase_table,generator_table,cycle_level_table]:
+        for name,value in time_fields.items(): table[name]=value
     annotated.to_csv(output_dir / "cleaned" / "full_annotated_data.csv", index=False)
     annotated.loc[annotated["Is_Steady_State"]].to_csv(output_dir / "cleaned" / "steady_state_data.csv", index=False)
     for block in blocks:
@@ -219,13 +226,13 @@ def run(args: argparse.Namespace) -> Path:
     logging.info("Created %d Stage 4 diagnostic graphs",len(stage4_graphs))
     stage5_graphs=create_stage5_diagnostics(annotated,blocks,pressure_pair_table,pressure_response_table,torque_table,generator_table,quality_counts,output_dir,config)
     logging.info("Created %d Stage 5 diagnostic graphs",len(stage5_graphs))
-    steady_metrics=pd.DataFrame([{"Run_ID":block.run_id,"Steady_State_Sample_Count":int(annotated.loc[block.start_row:block.end_row,"Is_Steady_State"].sum()),"Steady_State_Duration_s":float((annotated.loc[annotated.loc[block.start_row:block.end_row].index[annotated.loc[block.start_row:block.end_row,"Is_Steady_State"]],"TimeStamp"].max()-annotated.loc[annotated.loc[block.start_row:block.end_row].index[annotated.loc[block.start_row:block.end_row,"Is_Steady_State"]],"TimeStamp"].min()).total_seconds())} for block in blocks])
+    steady_metrics=pd.DataFrame([{"Run_ID":block.run_id,"Steady_State_Sample_Count":int(annotated.loc[block.start_row:block.end_row,"Is_Steady_State"].sum()),"Steady_State_Duration_s":float(annotated.loc[annotated.loc[block.start_row:block.end_row].index[annotated.loc[block.start_row:block.end_row,"Is_Steady_State"]],"Elapsed_Time_s"].max()-annotated.loc[annotated.loc[block.start_row:block.end_row].index[annotated.loc[block.start_row:block.end_row,"Is_Steady_State"]],"Elapsed_Time_s"].min())} for block in blocks])
     table_context={"intake_audit":pd.DataFrame([{"Metric":k,"Value":v} for k,v in validated.audit.items()]),"boundaries":boundaries,"steady":steady_table,"steady_metrics":steady_metrics,"vfd":vfd_table,"encoder_summary":final_summary_table,"encoder_methods":final_method_table,"encoder_intervals":final_intervals,"descriptive":descriptive_table,"cycle_level":cycle_level_table,"pressure_derived":pressure_derived_table,"pressure_response":pressure_response_table,"pressure_pairs":pressure_pair_table,"pressure_phase":pressure_pair_table[[c for c in ["Run_ID","Signal_1","Signal_2","Data_State","Data_Version","Zero_Lag_Pearson","Zero_Lag_Spearman","Maximum_Lagged_Correlation","Maximum_Absolute_Lagged_Correlation","Signed_Lag_Samples","Signed_Lag_Seconds","Phase_Degrees","Wrapped_Phase_Degrees","Lag_Sign_Convention","Measured_Cycle_s","Lag_Search_Limit_s","Reliability","Reliability_Reason"] if c in pressure_pair_table]],"pressure_consistency":pressure_consistency_table,"torque":torque_table,"torque_phase":torque_phase_table,"generator":generator_table,"correlation":correlation_table,"quality_findings":quality_findings,"quality_counts":quality_counts}
     cross_test=build_cross_test_comparison(table_context); cross_test.to_csv(output_dir/"tables"/"cross_test_comparison.csv",index=False)
     table_context["cross_test"]=cross_test
     reporting_settings=config.get("reporting",{}); final_graphs=[]
     if reporting_settings.get("enabled",True) and reporting_settings.get("include_final_graphs",True): final_graphs=create_final_graph_package(annotated,blocks,table_context,output_dir,config); logging.info("Created %d final Stage 6 graphs",len(final_graphs))
-    metadata=build_reproducibility_metadata(args.input,args.config,config,output_dir,loaded.selected_sheet,len(annotated),[c for c in loaded.data.columns if c!="Original_Row_Order"])
+    metadata=build_reproducibility_metadata(args.input,args.config,config,output_dir,loaded.selected_sheet,len(annotated),[c for c in loaded.data.columns if c!="Original_Row_Order"],time_metadata=validated.audit)
     save_reproducibility(output_dir,metadata,config); logging.info("Reproducibility: %s",metadata)
     report_context={"tables":table_context,"cross_test":cross_test,"audit":validated.audit,"metadata":metadata,"annotated":annotated}
     if reporting_settings.get("enabled",True) and reporting_settings.get("create_markdown_reports",True) and not args.skip_report: create_markdown_reports(output_dir,report_context,config)
@@ -239,7 +246,10 @@ def run(args: argparse.Namespace) -> Path:
 
     print("\nINTAKE AUDIT")
     print(f"Detected columns: {', '.join(column for column in loaded.data.columns if column != 'Original_Row_Order')}")
-    print(f"Timestamp range: {validated.audit['timestamp_start']} to {validated.audit['timestamp_end']}")
+    print(f"Time source: {validated.audit['time_source']}")
+    print(f"Timestamp range: {validated.audit['absolute_timestamp_range']}")
+    print(f"Elapsed duration: {validated.audit['duration_s']:.9g} s")
+    if validated.audit['time_reconstructed_flag']: print(f"Assumed sample interval: {validated.audit['assumed_sample_interval_s']:.9g} s; timing jitter unavailable")
     print(
         "Sampling interval (s): "
         f"median={validated.audit['sampling_interval_median_s']:.9g}, "

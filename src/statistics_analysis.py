@@ -11,6 +11,9 @@ from scipy.stats import linregress, pearsonr, spearmanr
 
 MEASURED_DERIVED_SIGNALS=["Pressure_1","Pressure_2","Pressure_3","Pressure_4","Upstream_Mean","Downstream_Mean","DeltaP_13","DeltaP_24","Turbine_DeltaP","Torque","Encoder","Gen_V","Target_VFD_Hz","Reconstructed_Target_VFD_Hz","VFD_Command_mV","Reconstructed_Command_mV_Capped"]
 
+def _time(data:pd.DataFrame)->pd.Series:
+    return data.Elapsed_Time_s if "Elapsed_Time_s" in data else (data.TimeStamp-data.TimeStamp.iloc[0]).dt.total_seconds()
+
 
 def numeric_statistics(values: pd.Series,duration_s:float) -> dict[str,Any]:
     x=pd.to_numeric(values,errors="coerce").dropna().to_numpy(float); n=len(x)
@@ -22,7 +25,7 @@ def descriptive_statistics(data:pd.DataFrame) -> pd.DataFrame:
     rows=[]
     for run_id,run in data[data.Run_ID.notna() & data.Run_ID.astype(str).ne("")].groupby("Run_ID"):
         for section,section_data in [("entire_run",run),("startup_transient",run[run.Operating_State=="startup_transient"]),("steady_state",run[run.Operating_State=="steady_state"]),("stopping_transient",run[run.Operating_State=="stopping_transient"])]:
-            duration=(section_data.TimeStamp.max()-section_data.TimeStamp.min()).total_seconds() if len(section_data)>1 else 0.0
+            duration=float(_time(section_data).max()-_time(section_data).min()) if len(section_data)>1 else 0.0
             for signal in MEASURED_DERIVED_SIGNALS:
                 if signal in section_data:
                     rows.append({"Run_ID":run_id,"Section":section,"Signal":signal,"Primary_Comparison":section=="steady_state",**numeric_statistics(section_data[signal],duration)})
@@ -39,7 +42,7 @@ def cycle_level_statistics(data:pd.DataFrame,config:dict[str,Any]) -> pd.DataFra
             rows.append({"Run_ID":run_id,"Cycle_Number":int(cycle),"Signal":signal,"Category":"pressure","Mean":np.mean(x),"Minimum":np.min(x),"Maximum":np.max(x),"Positive_Peak":np.max(x),"Negative_Peak":np.min(x),"Peak_To_Peak":np.ptp(x),"RMS":np.sqrt(np.mean(x*x)),"Sample_Std":np.std(x,ddof=1) if len(x)>1 else np.nan,"Linear_Drift_Per_s":np.nan,"Cycle_Quality_Flag":""})
         for signal,category in [("Torque","torque"),("Gen_V","generator_voltage")]:
             if signal not in group: continue
-            x=group[signal].dropna().to_numpy(float); t=(group.TimeStamp-group.TimeStamp.iloc[0]).dt.total_seconds().to_numpy(); slope=float(linregress(t,x).slope) if len(x)>=3 and np.ptp(t)>0 else np.nan
+            x=group[signal].dropna().to_numpy(float); t=(_time(group)-_time(group).iloc[0]).to_numpy(); slope=float(linregress(t,x).slope) if len(x)>=3 and np.ptp(t)>0 else np.nan
             rows.append({"Run_ID":run_id,"Cycle_Number":int(cycle),"Signal":signal,"Category":category,"Mean":np.mean(x),"Minimum":np.min(x),"Maximum":np.max(x),"Positive_Peak":np.max(x),"Negative_Peak":np.min(x),"Peak_To_Peak":np.ptp(x),"RMS":np.sqrt(np.mean(x*x)),"Sample_Std":np.std(x,ddof=1) if len(x)>1 else np.nan,"Linear_Drift_Per_s":slope,"Cycle_Quality_Flag":""})
     return pd.DataFrame(rows)
 
@@ -68,7 +71,7 @@ def generator_summary(data:pd.DataFrame,run_periods:dict[str,float],config:dict[
     rows=[]
     for run_id,run in data[data.Run_ID.notna() & data.Run_ID.astype(str).ne("")].groupby("Run_ID"):
         if "Gen_V" not in run: continue
-        x=run.Gen_V.dropna(); t=(run.loc[x.index,"TimeStamp"]-run.loc[x.index,"TimeStamp"].iloc[0]).dt.total_seconds(); fit=linregress(t,x) if len(x)>=3 and np.ptp(t)>0 else None; period=run_periods.get(str(run_id),np.nan)
+        x=run.Gen_V.dropna(); t=_time(run).loc[x.index]-_time(run).loc[x.index].iloc[0]; fit=linregress(t,x) if len(x)>=3 and np.ptp(t)>0 else None; period=run_periods.get(str(run_id),np.nan)
         autocorr_strength=np.nan; dominant_amplitude=np.nan; dominant_period=np.nan; periodicity_confidence=0.0
         if len(x)>3 and np.std(x)>0:
             centered=x.to_numpy()-x.mean(); lag=int(round(period/np.median(np.diff(t)))) if np.isfinite(period) else 0

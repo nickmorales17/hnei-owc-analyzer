@@ -53,6 +53,8 @@ def _event_method(indices: np.ndarray, dt: float, name: str) -> dict[str, Any]:
 
 
 def autocorrelation_period(values: np.ndarray, dt: float, minimum_s: float, maximum_s: float) -> dict[str, Any]:
+    if len(values) == 0:
+        return {"method": "autocorrelation", "period_s": np.nan, "frequency_hz": np.nan, "event_interval_count": 0, "period_std_s": np.nan, "confidence": 0.0, "failure_reason": "No steady-state samples."}
     centered = values - np.mean(values)
     corr = correlate(centered, centered, mode="full", method="fft")[len(values)-1:]
     if len(corr) == 0 or corr[0] <= 0:
@@ -67,6 +69,8 @@ def autocorrelation_period(values: np.ndarray, dt: float, minimum_s: float, maxi
 
 
 def fft_period(values: np.ndarray, dt: float, minimum_s: float, maximum_s: float) -> dict[str, Any]:
+    if len(values) == 0:
+        return {"method": "fft", "period_s": np.nan, "frequency_hz": np.nan, "event_interval_count": 0, "period_std_s": np.nan, "confidence": 0.0, "failure_reason": "No steady-state samples."}
     centered = values - np.mean(values); frequencies = np.fft.rfftfreq(len(values), dt); power = np.abs(np.fft.rfft(centered)) ** 2
     mask = (frequencies >= 1/maximum_s) & (frequencies <= 1/minimum_s)
     if not np.any(mask) or np.sum(power[mask]) == 0:
@@ -127,7 +131,7 @@ def analyze_encoder_cycles(run_id: str, steady: pd.DataFrame, processing: Encode
     outliers = flag_interval_outliers(intervals, float(settings.get("cycle_interval_deviation_tolerance", 0.10)))
     rows = []
     median_interval = float(np.median(intervals)) if len(intervals) else np.nan
-    timestamps = steady["TimeStamp"].reset_index(drop=True)
+    timestamps = steady["TimeStamp"].reset_index(drop=True) if "TimeStamp" in steady else steady["Elapsed_Time_s"].reset_index(drop=True)
     raw = steady["Encoder"].reset_index(drop=True)
     for number, (left, right, interval, outlier) in enumerate(zip(cycle_events[:-1], cycle_events[1:], intervals, outliers), 1):
         portion = raw.iloc[left:right+1]

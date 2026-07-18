@@ -29,11 +29,14 @@ def git_commit()->str:
     except (OSError,subprocess.CalledProcessError): return "unavailable"
 
 
-def build_reproducibility_metadata(input_path:str|Path,config_path:str|Path,config:dict[str,Any],output_dir:Path,worksheet:str|None,total_records:int,available_channels:list[str],invocation:list[str]|None=None)->dict[str,Any]:
+def build_reproducibility_metadata(input_path:str|Path,config_path:str|Path,config:dict[str,Any],output_dir:Path,worksheet:str|None,total_records:int,available_channels:list[str],invocation:list[str]|None=None,time_metadata:dict[str,Any]|None=None)->dict[str,Any]:
     packages={name:importlib.metadata.version(name) for name in ["pandas","numpy","scipy","matplotlib","openpyxl","PyYAML"]}
     expected=["Pressure_1","Pressure_2","Pressure_3","Pressure_4","Torque","Encoder","Gen_V"]
     vfd=config.get("vfd_command",{})
-    return {"input_filename":Path(input_path).name,"input_sha256":sha256_file(input_path),"configuration_filename":str(config_path),"configuration_sha256":sha256_file(config_path),"configuration_profile":config.get("profile_name","default"),"analysis_timestamp":datetime.now(timezone.utc).isoformat(),"python_version":platform.python_version(),"dependency_versions":packages,"git_commit":git_commit(),"command_line_invocation":" ".join(invocation or sys.argv),"worksheet_analyzed":worksheet,"total_records":int(total_records),"available_channels":available_channels,"missing_expected_channels":[c for c in expected if c not in available_channels],"vfd_scaling_status":"verified_configured" if vfd.get("enabled") else "unavailable_unverified_scaling","output_directory":str(output_dir.resolve())}
+    result={"input_filename":Path(input_path).name,"input_sha256":sha256_file(input_path),"configuration_filename":str(config_path),"configuration_sha256":sha256_file(config_path),"configuration_profile":config.get("profile_name","default"),"analysis_timestamp":datetime.now(timezone.utc).isoformat(),"python_version":platform.python_version(),"dependency_versions":packages,"git_commit":git_commit(),"command_line_invocation":" ".join(invocation or sys.argv),"worksheet_analyzed":worksheet,"total_records":int(total_records),"available_channels":available_channels,"missing_expected_channels":[c for c in expected if c not in available_channels],"vfd_scaling_status":"verified_configured" if vfd.get("enabled") else "unavailable_unverified_scaling","output_directory":str(output_dir.resolve())}
+    if time_metadata:
+        result.update({key:time_metadata.get(key) for key in ["time_source","time_reconstructed_flag","assumed_sample_interval_s","duration_s","absolute_timestamp_range","sampling_jitter_available","record_gap_count","timing_dependency_note"]})
+    return result
 
 
 def save_reproducibility(output_dir:Path,metadata:dict[str,Any],config:dict[str,Any])->tuple[Path,Path]:
